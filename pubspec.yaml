@@ -1,0 +1,8 @@
+name: lynsok_workspace
+environment:
+  sdk: ^3.6.0
+
+workspace:
+  - packages/lynsok_core
+  - apps/lynsok_cli
+  - apps/desktop
