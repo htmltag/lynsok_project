@@ -1,6 +1,7 @@
 name: lynsok_cli
 description: A command-line interface for Lynsok, providing tools for managing and interacting with the Lynsok ecosystem.
 version: 0.1.0
+license: Apache-2.0
 executables:
   lynsok: bin/lynsok.dart
   lynsok_mcp: bin/mcp.dart
