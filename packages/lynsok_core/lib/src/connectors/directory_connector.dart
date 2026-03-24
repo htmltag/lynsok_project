@@ -22,8 +22,23 @@ class DirectoryConnector {
     final dir = Directory(path);
     final files = dir.list(recursive: true).where((item) => item is File);
 
-    await for (final file in files) {
-      final connector = FileConnector(file.path, chunkSize: chunkSize);
+    await for (final entity in files) {
+      final File file = entity as File;
+      int currentChunkSize = chunkSize;
+
+      // Binary formats like PDF and DOCX are best processed in full to avoid
+      // splitting compression streams or zip headers across chunks.
+      final String lowerPath = file.path.toLowerCase();
+      if (lowerPath.endsWith('.pdf') || lowerPath.endsWith('.docx')) {
+        try {
+          final int length = await file.length();
+          if (length > 0) {
+            currentChunkSize = length;
+          }
+        } catch (_) {}
+      }
+
+      final connector = FileConnector(file.path, chunkSize: currentChunkSize);
       await for (final chunk in connector.streamChunks()) {
         yield chunk;
       }
