@@ -10,6 +10,8 @@ class IndexModel {
   DateTime? lastIndexedAt;
   bool serverActive;
   List<String> excludePatterns;
+  int? httpServerPid;
+  int? mcpServerPid;
 
   IndexModel({
     this.id,
@@ -23,6 +25,8 @@ class IndexModel {
     this.lastIndexedAt,
     this.serverActive = false,
     this.excludePatterns = const [],
+    this.httpServerPid,
+    this.mcpServerPid,
   }) : createdAt = createdAt ?? DateTime.now();
 
   // Convert to Map for database
@@ -39,6 +43,8 @@ class IndexModel {
       'lastIndexedAt': lastIndexedAt?.toIso8601String(),
       'serverActive': serverActive ? 1 : 0,
       'excludePatterns': excludePatterns.join(';'),
+      'httpServerPid': httpServerPid,
+      'mcpServerPid': mcpServerPid,
     };
   }
 
@@ -53,9 +59,13 @@ class IndexModel {
       fileCount: map['fileCount'] ?? 0,
       totalSize: map['totalSize'] ?? 0,
       createdAt: DateTime.parse(map['createdAt']),
-      lastIndexedAt: map['lastIndexedAt'] != null ? DateTime.parse(map['lastIndexedAt']) : null,
+      lastIndexedAt: map['lastIndexedAt'] != null
+          ? DateTime.parse(map['lastIndexedAt'])
+          : null,
       serverActive: map['serverActive'] == 1,
       excludePatterns: map['excludePatterns']?.split(';') ?? [],
+      httpServerPid: map['httpServerPid'] as int?,
+      mcpServerPid: map['mcpServerPid'] as int?,
     );
   }
 
@@ -71,6 +81,8 @@ class IndexModel {
     DateTime? lastIndexedAt,
     bool? serverActive,
     List<String>? excludePatterns,
+    int? httpServerPid,
+    int? mcpServerPid,
   }) {
     return IndexModel(
       id: id ?? this.id,
@@ -84,6 +96,8 @@ class IndexModel {
       lastIndexedAt: lastIndexedAt ?? this.lastIndexedAt,
       serverActive: serverActive ?? this.serverActive,
       excludePatterns: excludePatterns ?? this.excludePatterns,
+      httpServerPid: httpServerPid ?? this.httpServerPid,
+      mcpServerPid: mcpServerPid ?? this.mcpServerPid,
     );
   }
 

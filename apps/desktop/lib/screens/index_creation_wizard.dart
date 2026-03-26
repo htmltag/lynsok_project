@@ -5,7 +5,6 @@ import 'package:desktop/models/index_model.dart';
 import 'package:desktop/providers/index_provider.dart';
 import 'package:desktop/providers/lynsok_provider.dart';
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 
 class IndexCreationWizard extends ConsumerStatefulWidget {
   const IndexCreationWizard({super.key});
@@ -18,6 +17,7 @@ class IndexCreationWizard extends ConsumerStatefulWidget {
 class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
   int _currentStep = 0;
   String? _selectedPath;
+  String? _outputLynPath;
   final List<String> _excludePatterns = [
     '.git',
     'node_modules',
@@ -126,6 +126,18 @@ class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
             }
           },
         ),
+        const SizedBox(height: 16),
+        const Text('Index output file (.lyn):'),
+        const SizedBox(height: 8),
+        ElevatedButton.icon(
+          onPressed: _pickOutputFile,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Choose Output File'),
+        ),
+        if (_outputLynPath != null) ...[
+          const SizedBox(height: 8),
+          Text('Output: $_outputLynPath'),
+        ],
       ],
     );
   }
@@ -153,12 +165,40 @@ class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
         const SizedBox(height: 16),
         Text('Name: ${_nameController.text}'),
         Text('Source: $_selectedPath'),
+        Text('Output (.lyn): ${_outputLynPath ?? '(not selected)'}'),
+        Text(
+          'Output (.idx): ${_outputLynPath == null ? '(not selected)' : '${_outputLynPath!}.idx'}',
+        ),
         Text('Excludes: ${_excludePatterns.join(', ')}'),
       ],
     );
   }
 
   void _onStepContinue() {
+    if (_currentStep == 0 && _selectedPath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a source folder first.')),
+      );
+      return;
+    }
+
+    if (_currentStep == 1) {
+      if (_nameController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please provide an index name.')),
+        );
+        return;
+      }
+      if (_outputLynPath == null || _outputLynPath!.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please choose an output .lyn file path.'),
+          ),
+        );
+        return;
+      }
+    }
+
     if (_currentStep < 2) {
       setState(() {
         _currentStep++;
@@ -188,14 +228,40 @@ class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
     }
   }
 
-  Future<void> _createIndex() async {
-    if (_selectedPath == null || _nameController.text.isEmpty) return;
+  Future<void> _pickOutputFile() async {
+    final suggestedName = _nameController.text.trim().isEmpty
+        ? 'index.lyn'
+        : '${_nameController.text.trim()}.lyn';
 
-    final appDir = await getApplicationDocumentsDirectory();
-    final lynPath = '${appDir.path}/${_nameController.text}.lyn';
+    final result = await FilePicker.platform.saveFile(
+      dialogTitle: 'Choose where to save the index archive',
+      fileName: suggestedName,
+      type: FileType.custom,
+      allowedExtensions: ['lyn'],
+    );
+
+    if (result != null && result.trim().isNotEmpty) {
+      setState(() {
+        _outputLynPath = _normalizeLynPath(result.trim());
+      });
+    }
+  }
+
+  String _normalizeLynPath(String inputPath) {
+    if (inputPath.toLowerCase().endsWith('.lyn')) {
+      return inputPath;
+    }
+    return '$inputPath.lyn';
+  }
+
+  Future<void> _createIndex() async {
+    if (_selectedPath == null || _nameController.text.trim().isEmpty) return;
+    if (_outputLynPath == null || _outputLynPath!.trim().isEmpty) return;
+
+    final lynPath = _normalizeLynPath(_outputLynPath!.trim());
 
     final index = IndexModel(
-      name: _nameController.text,
+      name: _nameController.text.trim(),
       sourcePath: _selectedPath!,
       lynPath: lynPath,
       indexPath: '$lynPath.idx',
@@ -203,21 +269,29 @@ class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
       createdAt: DateTime.now(),
     );
 
-    // Add to database first
-    await ref.read(indexProvider.notifier).addIndex(index);
+    try {
+      // Add to database first
+      await ref.read(indexProvider.notifier).addIndex(index);
 
-    // Start indexing
-    await ref
-        .read(indexingProvider.notifier)
-        .startIndexing(
-          _selectedPath!,
-          lynPath,
-          excludePatterns: _excludePatterns,
-        );
+      // Start indexing
+      await ref
+          .read(indexingProvider.notifier)
+          .startIndexing(
+            _selectedPath!,
+            lynPath,
+            excludePatterns: _excludePatterns,
+          );
 
-    // Navigate back to dashboard
-    if (mounted) {
-      Navigator.of(context).pop();
+      // Navigate back to dashboard
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to create index: $e')));
+      }
     }
   }
 }

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:desktop/models/index_model.dart';
 import 'package:desktop/providers/lynsok_provider.dart';
+import 'package:desktop/providers/server_process_provider.dart';
+import 'package:desktop/providers/index_provider.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:lynsok_core/lynsok_runner.dart';
 
@@ -101,7 +103,12 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                           overflow: TextOverflow.ellipsis,
                         ),
                         onTap: () {
-                          // TODO: Open document viewer
+                          // Open document viewer with the result
+                          _openDocumentViewer(
+                            result['path'] ?? '',
+                            result['title'] ?? 'Document',
+                            result['snippet'] ?? '',
+                          );
                         },
                       );
                     },
@@ -162,6 +169,25 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   Widget _buildConnectivityTab() {
     final config = ref.watch(configProvider);
 
+    // Watch server state for this index
+    final serverState = ref.watch(
+      indexServersProviderWithConfig((
+        id: widget.index.id?.toString() ?? 'unknown',
+        lynPath: widget.index.lynPath,
+        indexPath: widget.index.indexPath,
+        port: config?.restPort ?? 8181,
+      )),
+    );
+
+    final serverNotifier = ref.read(
+      indexServersProviderWithConfig((
+        id: widget.index.id?.toString() ?? 'unknown',
+        lynPath: widget.index.lynPath,
+        indexPath: widget.index.indexPath,
+        port: config?.restPort ?? 8181,
+      )).notifier,
+    );
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -182,18 +208,30 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                       ),
                       const Spacer(),
                       Switch(
-                        value: widget.index.serverActive,
-                        onChanged: (value) {
-                          // TODO: Toggle HTTP server
-                        },
+                        value: serverState.httpServerRunning,
+                        onChanged: serverState.isLoading
+                            ? null
+                            : (_) => serverNotifier.toggleHttpServer(),
                       ),
                     ],
                   ),
-                  if (widget.index.serverActive) ...[
+                  if (serverState.httpServerRunning) ...[
                     const SizedBox(height: 8),
                     Text('Running on port ${config?.restPort ?? 8181}'),
                     Text(
                       'Endpoint: http://localhost:${config?.restPort ?? 8181}/search',
+                    ),
+                    if (serverState.httpServerPid != null)
+                      Text('PID: ${serverState.httpServerPid}'),
+                  ],
+                  if (serverState.error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      serverState.error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ],
@@ -218,15 +256,30 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                       ),
                       const Spacer(),
                       Switch(
-                        value: false, // TODO: MCP server status
-                        onChanged: (value) {
-                          // TODO: Toggle MCP server
-                        },
+                        value: serverState.mcpServerRunning,
+                        onChanged: serverState.isLoading
+                            ? null
+                            : (_) => serverNotifier.toggleMcpServer(),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   const Text('Model Context Protocol for LLM integration'),
+                  if (serverState.mcpServerRunning &&
+                      serverState.mcpServerPid != null) ...[
+                    const SizedBox(height: 8),
+                    Text('PID: ${serverState.mcpServerPid}'),
+                  ],
+                  if (serverState.error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      serverState.error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -476,16 +529,83 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   }
 
   void _reindex() {
-    // TODO: Implement re-indexing
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Re-indexing functionality coming soon')),
-      );
-    }
+    final indexingNotifier = ref.read(indexingProvider.notifier);
+
+    // Start the re-indexing immediately
+    indexingNotifier.startIndexing(
+      widget.index.sourcePath,
+      widget.index.lynPath,
+      excludePatterns: widget.index.excludePatterns,
+    );
+
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Re-indexing'),
+        content: Consumer(
+          builder: (context, refInDialog, _) {
+            final indexingState = refInDialog.watch(indexingProvider);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (indexingState.isIndexing) ...[
+                  LinearProgressIndicator(
+                    value: indexingState.progress > 0
+                        ? indexingState.progress
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Indexing: ${(indexingState.progress * 100).toStringAsFixed(1)}%',
+                  ),
+                  if (indexingState.currentFile.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'File: ${indexingState.currentFile}',
+                      style: const TextStyle(fontSize: 12),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ] else if (indexingState.error != null) ...[
+                  Text(
+                    'Error: ${indexingState.error}',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ] else ...[
+                  const Text('Re-indexing complete!'),
+                ],
+              ],
+            );
+          },
+        ),
+        actions: [
+          Consumer(
+            builder: (context, refInDialog, _) {
+              final indexingState = refInDialog.watch(indexingProvider);
+              if (!indexingState.isIndexing) {
+                return TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    // Refresh the index list
+                    ref.read(indexProvider.notifier).refreshIndexes();
+                  },
+                  child: const Text('Close'),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   void _deleteIndex() {
-    // TODO: Implement delete with confirmation
     if (mounted) {
       showDialog(
         context: context,
@@ -500,10 +620,41 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () {
-                // TODO: Delete files and remove from DB
-                Navigator.of(context).pop();
-                Navigator.of(context).pop(); // Back to dashboard
+              onPressed: () async {
+                try {
+                  // Delete .lyn and .idx files
+                  final lynFile = File(widget.index.lynPath);
+                  final idxFile = File(widget.index.indexPath);
+
+                  if (await lynFile.exists()) {
+                    await lynFile.delete();
+                  }
+                  if (await idxFile.exists()) {
+                    await idxFile.delete();
+                  }
+
+                  // Remove from database
+                  if (widget.index.id != null) {
+                    await ref
+                        .read(indexProvider.notifier)
+                        .removeIndex(widget.index.id!);
+                  }
+
+                  if (mounted) {
+                    Navigator.of(context).pop(); // Close dialog
+                    Navigator.of(context).pop(); // Back to dashboard
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Index deleted')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to delete: $e')),
+                    );
+                  }
+                }
               },
               child: const Text('Delete'),
             ),
@@ -511,5 +662,36 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
         ),
       );
     }
+  }
+
+  void _openDocumentViewer(String path, String title, String snippet) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Source: $path',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(snippet, style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 }

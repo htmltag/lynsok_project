@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 
 class DatabaseService {
   static Database? _database;
+  static const int _dbVersion = 2;
 
   static Future<Database> getInstance() async {
     if (_database != null) return _database!;
@@ -13,8 +14,12 @@ class DatabaseService {
 
     _database = await openDatabase(
       dbPath,
-      version: 1,
+      version: _dbVersion,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+      onOpen: (db) async {
+        await _ensureSchema(db);
+      },
     );
 
     return _database!;
@@ -33,9 +38,43 @@ class DatabaseService {
         createdAt TEXT NOT NULL,
         lastIndexedAt TEXT,
         serverActive INTEGER DEFAULT 0,
-        excludePatterns TEXT
+        excludePatterns TEXT,
+        httpServerPid INTEGER,
+        mcpServerPid INTEGER
       )
     ''');
+  }
+
+  static Future<void> _onUpgrade(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      await _addColumnIfMissing(db, 'indexes', 'httpServerPid', 'INTEGER');
+      await _addColumnIfMissing(db, 'indexes', 'mcpServerPid', 'INTEGER');
+    }
+  }
+
+  static Future<void> _ensureSchema(Database db) async {
+    // Defensive check to self-heal partially migrated local DBs.
+    await _addColumnIfMissing(db, 'indexes', 'httpServerPid', 'INTEGER');
+    await _addColumnIfMissing(db, 'indexes', 'mcpServerPid', 'INTEGER');
+  }
+
+  static Future<void> _addColumnIfMissing(
+    Database db,
+    String tableName,
+    String columnName,
+    String columnType,
+  ) async {
+    final result = await db.rawQuery('PRAGMA table_info($tableName)');
+    final hasColumn = result.any((row) => row['name'] == columnName);
+    if (!hasColumn) {
+      await db.execute(
+        'ALTER TABLE $tableName ADD COLUMN $columnName $columnType',
+      );
+    }
   }
 
   static Future<void> close() async {

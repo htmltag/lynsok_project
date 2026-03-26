@@ -55,10 +55,7 @@ class IndexNotifier extends StateNotifier<IndexState> {
         indexes: indexes,
       );
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
@@ -72,35 +69,46 @@ class IndexNotifier extends StateNotifier<IndexState> {
   Future<void> addIndex(IndexModel index) async {
     if (_database == null) return;
 
-    final id = await _database!.insert('indexes', index.toMap());
-    final newIndex = index.copyWith(id: id);
+    try {
+      final id = await _database!.insert('indexes', index.toMap());
+      final newIndex = index.copyWith(id: id);
 
-    final indexes = [...state.indexes, newIndex];
-    state = state.copyWith(indexes: indexes);
+      final indexes = [...state.indexes, newIndex];
+      state = state.copyWith(indexes: indexes, error: null);
+    } on DatabaseException catch (e) {
+      final msg =
+          'Failed to save index metadata. If this is an existing install, restart the app to run DB migration. Details: ${e.toString()}';
+      state = state.copyWith(error: msg);
+      throw StateError(msg);
+    }
   }
 
   Future<void> updateIndex(IndexModel index) async {
     if (_database == null || index.id == null) return;
 
-    await _database!.update(
-      'indexes',
-      index.toMap(),
-      where: 'id = ?',
-      whereArgs: [index.id],
-    );
+    try {
+      await _database!.update(
+        'indexes',
+        index.toMap(),
+        where: 'id = ?',
+        whereArgs: [index.id],
+      );
 
-    final indexes = state.indexes.map((i) => i.id == index.id ? index : i).toList();
-    state = state.copyWith(indexes: indexes);
+      final indexes = state.indexes
+          .map((i) => i.id == index.id ? index : i)
+          .toList();
+      state = state.copyWith(indexes: indexes, error: null);
+    } on DatabaseException catch (e) {
+      final msg = 'Failed to update index metadata: ${e.toString()}';
+      state = state.copyWith(error: msg);
+      throw StateError(msg);
+    }
   }
 
   Future<void> removeIndex(int id) async {
     if (_database == null) return;
 
-    await _database!.delete(
-      'indexes',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await _database!.delete('indexes', where: 'id = ?', whereArgs: [id]);
 
     final indexes = state.indexes.where((i) => i.id != id).toList();
     state = state.copyWith(indexes: indexes);
