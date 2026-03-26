@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:io';
 
-import 'package:lynsok_core/src/workers/log_processor.dart';
+import 'package:lynsok_core/src/workers/lynsok_engine.dart';
 import 'message_types.dart';
 
 /// Manages a pool of isolates to process log files concurrently.
