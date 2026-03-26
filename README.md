@@ -17,33 +17,44 @@ In a world of complex cloud-based vector databases, LynSøk takes a different pa
 🔌 **MCP Ready:** Native support for the Model Context Protocol. Connect your private knowledge base to Claude, Cursor, or any modern AI IDE in seconds.
 
 ## The Architecture
-LynSøk isn't just a search engine; it’s a full-stack context pipeline:
+LynSøk is now organized as a Dart workspace monorepo with shared core logic and multiple app surfaces:
 
-**Compact:** Transform a messy folder of PDFs and Docs into a streamlined .lyn archive.
+**Core Engine (`packages/lynsok_core`):** Ingestion, extraction, archive format, indexing, search, config, and LLM client integrations.
 
-**Index:** Generate a high-density proximity and BM25 index for near-instant lookup.
+**Interfaces (`apps/lynsok_cli`):** CLI tools for compaction/search plus REST, MCP, and LLM-oriented entry points.
 
-**Serve:** Expose that knowledge via CLI, REST API, or MCP Server.
+**Desktop UI (`apps/desktop`):** Flutter desktop app for creating/managing indexes with local metadata persistence.
+
+At runtime, all surfaces use the same pipeline: **ingest -> compact (`.lyn`) -> index (`.idx`) -> retrieve (BM25 + proximity + smart snippets)**.
 
 ---
 
 ## 🚀 Quick start
 
+From the workspace root (`lynsok_project`):
+
 ```bash
 # Build a LynSok Binary Archive (LYN) from a directory
-lynsok -f /path/to/data -o corpus.lyn
+dart run apps/lynsok_cli/bin/lynsok.dart -f /path/to/data -o corpus.lyn
 
 # Build the archive + index (fast search)
-lynsok -f /path/to/data -o corpus.lyn -x
+dart run apps/lynsok_cli/bin/lynsok.dart -f /path/to/data -o corpus.lyn -x
 
 # Search the archive (uses the index if present)
-lynsok search --lyn corpus.lyn --query "your query" --max-results 10
+dart run apps/lynsok_cli/bin/lynsok.dart search --lyn corpus.lyn --query "your query" --max-results 10
 ```
 
-If you run via `dart run`, use:
+Or from inside `apps/lynsok_cli`:
 
 ```bash
+cd apps/lynsok_cli
 dart run bin/lynsok.dart search --lyn corpus.lyn --query "your query"
+```
+
+If you have the executable installed on `PATH`, you can also use:
+
+```bash
+lynsok search --lyn corpus.lyn --query "your query"
 ```
 
 ---
@@ -85,36 +96,66 @@ lynsok search --lyn corpus.lyn --query "your query" --max-results 5 --rag
 ---
 
 ## 🏗 Architecture Overview
+### 1) Workspace Modules
 
-### 1) LynSok Archive (`.lyn`)
+```text
+lynsok_project/
+├── packages/
+│   └── lynsok_core/      # Shared engine + data format + search + config
+├── apps/
+│   ├── lynsok_cli/       # CLI binaries (search, mcp, server, llm)
+│   └── desktop/          # Flutter desktop application
+└── pubspec.yaml          # Dart workspace definition
+```
 
-A `.lyn` file is a compact binary container where each record contains:
-- The original file path
-- The extracted text (normalized to UTF-8)
+### 2) Ingestion and Compaction Pipeline
 
-This format is designed for fast sequential reads and efficient storage.
+`LynSokRunner` orchestrates ingestion and extraction in parallel:
 
-### 2) Search Index (`.idx`)
+1. **Connector layer** streams file chunks from a file or directory.
+2. **Isolate pool** distributes chunk work across worker isolates.
+3. **Extraction worker** normalizes plain text and extracts text from supported binary formats (notably PDF and DOCX).
+4. **Archive writer** appends extracted text into `.lyn` records and patches record lengths safely.
+5. **Optional index builder** tokenizes each record and emits a `.idx` sidecar index.
 
-The index is a JSON-based inverted index mapping **token → postings list**.
+### 3) Storage Formats
 
-Each posting includes:
-- `docId` (record index in the `.lyn` file)
+#### `.lyn` archive (binary)
+Record-oriented binary format:
+
+- Magic + version header
+- Per-record `STX`
+- Source path length + path
+- Body length + extracted UTF-8 text bytes
+- Per-record `ETX`
+
+This supports compact storage plus deterministic random access to document bodies.
+
+#### `.idx` index (JSON)
+Inverted index mapping token -> postings, where each posting stores:
+
+- `docId`
 - `tf` (term frequency)
-- `offsets` (list of byte offsets where the term occurs)
+- `offsets` (byte offsets for occurrences)
 
-Multiple offsets per term allow accurate proximity scoring.
+Document metadata (`path`, body offsets/lengths, token count) is persisted for fast snippet recovery from the archive.
 
-### 3) Search Pipeline (BM25 + Proximity)
+### 4) Retrieval Pipeline
 
-When searching:
+`LynSokSearcher` supports two modes:
 
-1. Tokenize the query.
-2. Look up postings for each term.
-3. Score documents using:
-   - **BM25** (relevance ranking)
-   - **Proximity boost** (documents in which query terms appear close together rank higher)
-4. Extract context-aware snippets around the best match.
+- **Indexed search:** BM25 ranking + proximity boost using posting offsets.
+- **Raw search fallback:** Full archive scan when no index is available.
+
+Snippets are centered around best match offsets, then expanded to sentence/paragraph boundaries for cleaner RAG context.
+
+### 5) Interface Layer
+
+- **CLI (`apps/lynsok_cli/bin/lynsok.dart`):** compaction, optional index build, and `search` subcommand.
+- **MCP server (`apps/lynsok_cli/bin/mcp.dart`):** exposes `lynsok.search` as an MCP tool over stdio.
+- **REST server (`apps/lynsok_cli/bin/server.dart`):** provides `/search` and `/health` endpoints.
+- **LLM helper (`apps/lynsok_cli/bin/llm.dart`):** retrieves top snippets and forwards context to configured LLM providers.
+- **Desktop app (`apps/desktop`):** uses Riverpod + sqflite to manage index entries and trigger core indexing.
 
 ---
 
@@ -151,79 +192,71 @@ This produces clean, meaningful chunks suitable for human reading and LLM prompt
 ---
 
 ## 🧪 Project structure
+This repository is a multi-package workspace:
 
-This repo is focused on a single shared core library (indexing/searching) with multiple interfaces built on top.
-
-```
-lynsok/
-├── bin/
-│   ├── lynsok.dart         # CLI entry point
-│   ├── mcp.dart               # MCP-style stdin/stdout JSON server
-│   ├── server.dart            # HTTP REST server (shelf)
-│   └── llm.dart               # RAG+LLM example (search + query an LLM)
-├── lib/
-│   ├── lynsok.dart     # Public export surface
-│   ├── src/
-│   │   ├── config.dart        # Config loader/saver (JSON)
-│   │   ├── llm.dart           # LLM helpers (OpenAI/Ollama)
-│   │   ├── searcher.dart      # Core search logic (BM25 + proximity)
-│   │   ├── utils/
-│   │   │   ├── lyn_format.dart
-│   │   │   ├── lyn_reader.dart
-│   │   │   ├── lyn_index.dart
-│   │   │   └── tokenizer.dart
-│   │   └── runner.dart        # Compaction / archive creation
-├── test/                      # Unit tests
-├── pubspec.yaml               # Dependencies and executables
-├── analysis_options.yaml
-└── .lynsok.json            # Optional config file (created on demand)
+```text
+.
+├── pubspec.yaml
+├── packages/
+│   └── lynsok_core/
+│       ├── lib/
+│       │   ├── lynsok_runner.dart
+│       │   └── src/
+│       │       ├── runner.dart
+│       │       ├── searcher.dart
+│       │       ├── config.dart
+│       │       ├── llm.dart
+│       │       ├── connectors/
+│       │       ├── core/
+│       │       ├── utils/
+│       │       └── workers/
+│       └── test/
+└── apps/
+  ├── lynsok_cli/
+  │   ├── bin/
+  │   │   ├── lynsok.dart
+  │   │   ├── mcp.dart
+  │   │   ├── server.dart
+  │   │   └── llm.dart
+  │   └── pubspec.yaml
+  └── desktop/
+    ├── lib/
+    │   ├── screens/
+    │   ├── providers/
+    │   ├── services/
+    │   ├── models/
+    │   └── widgets/
+    └── pubspec.yaml
 ```
 
 ---
 
 ## 🧩 Core + Interfaces
+### Core (`packages/lynsok_core`)
+Shared logic used by all app surfaces:
 
-### Core (`lib/`)
-The core library contains the shared logic used by all interfaces:
-- `.lyn` archive parsing and writing
-- Search indexing and BM25 + proximity scoring
-- Smart snippet extraction
-- Config file handling + LLM settings
+- `.lyn` archive write/read utilities
+- Chunk ingestion + isolate processing pipeline
+- Inverted index build/load (`.idx`)
+- Search ranking (BM25 + proximity)
+- Smart snippet extraction and highlighting
+- Shared config + LLM provider clients
 
-### Command-line interface (`bin/lynsok.dart`)
-Provides the primary CLI experience for compaction, indexing, and search.
+### CLI + Services (`apps/lynsok_cli`)
+Operational entry points built on `lynsok_core`:
 
-### MCP server (`bin/mcp.dart`)
-A stdin/stdout JSON-RPC 2.0 server that speaks the Model Context Protocol (MCP) framing used by tools like Claude Desktop, Cursor, and other MCP clients.
+- `lynsok`: compact, optional index build, and search
+- `lynsok_mcp`: MCP tool server exposing search for AI clients
+- `lynsok_server`: HTTP API (`/health`, `/search`)
+- `lynsok_llm`: retrieval + prompt composition + model call
 
-It uses `Content-Length` framing (not newline-delimited JSON) and supports:
-- `initialize` (handshake + capabilities)
-- `tools/list` (discover available tools)
-- `tools/call` (invoke tools such as `search`)
-- `$/cancel` (cancel in-flight operations)
+### Desktop App (`apps/desktop`)
+Flutter desktop interface for local index management:
 
-Example request (search tool call):
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "tool": "search",
-    "args": {
-      "query": "your query",
-      "max_results": 5
-    }
-  }
-}
-```
-
-### REST server (`bin/server.dart`)
-A small `shelf` server exposing endpoints like `/search`.
-
-### LLM helper (`bin/llm.dart`)
-A helper that performs a search and sends the top results to an LLM (OpenAI / Ollama) using the config.
+- Riverpod state notifiers for configuration and indexing jobs
+- sqflite-based metadata storage of index definitions
+- UI flow for creating, browsing, and inspecting local indexes
+- Direct use of `LynSokRunner` from the shared core package
 
 ---
 
