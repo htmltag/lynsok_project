@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:desktop/services/server_service.dart';
-import 'dart:io';
 
 // Singleton instance of ServerService
 final serverServiceProvider = Provider<ServerService>((ref) {
@@ -9,10 +8,14 @@ final serverServiceProvider = Provider<ServerService>((ref) {
 
 /// State for a single index's server processes
 class IndexServersState {
+  static const Object _sentinel = Object();
+
   final bool httpServerRunning;
   final bool mcpServerRunning;
   final int? httpServerPid;
   final int? mcpServerPid;
+  final int? httpServerPort;
+  final int? mcpServerPort;
   final String? error;
   final bool isLoading;
 
@@ -21,6 +24,8 @@ class IndexServersState {
     this.mcpServerRunning = false,
     this.httpServerPid,
     this.mcpServerPid,
+    this.httpServerPort,
+    this.mcpServerPort,
     this.error,
     this.isLoading = false,
   });
@@ -28,17 +33,29 @@ class IndexServersState {
   IndexServersState copyWith({
     bool? httpServerRunning,
     bool? mcpServerRunning,
-    int? httpServerPid,
-    int? mcpServerPid,
-    String? error,
+    Object? httpServerPid = _sentinel,
+    Object? mcpServerPid = _sentinel,
+    Object? httpServerPort = _sentinel,
+    Object? mcpServerPort = _sentinel,
+    Object? error = _sentinel,
     bool? isLoading,
   }) {
     return IndexServersState(
       httpServerRunning: httpServerRunning ?? this.httpServerRunning,
       mcpServerRunning: mcpServerRunning ?? this.mcpServerRunning,
-      httpServerPid: httpServerPid ?? this.httpServerPid,
-      mcpServerPid: mcpServerPid ?? this.mcpServerPid,
-      error: error,
+      httpServerPid: identical(httpServerPid, _sentinel)
+          ? this.httpServerPid
+          : httpServerPid as int?,
+      mcpServerPid: identical(mcpServerPid, _sentinel)
+          ? this.mcpServerPid
+          : mcpServerPid as int?,
+      httpServerPort: identical(httpServerPort, _sentinel)
+          ? this.httpServerPort
+          : httpServerPort as int?,
+      mcpServerPort: identical(mcpServerPort, _sentinel)
+          ? this.mcpServerPort
+          : mcpServerPort as int?,
+      error: identical(error, _sentinel) ? this.error : error as String?,
       isLoading: isLoading ?? this.isLoading,
     );
   }
@@ -50,7 +67,6 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
   final String _indexId;
   final String _lynPath;
   final String _indexPath;
-  final int _port;
 
   IndexServersNotifier({
     required ServerService serverService,
@@ -62,7 +78,6 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
        _indexId = indexId,
        _lynPath = lynPath,
        _indexPath = indexPath,
-       _port = port,
        super(const IndexServersState());
 
   /// Toggles the HTTP server on/off
@@ -75,6 +90,7 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
         state = state.copyWith(
           httpServerRunning: false,
           httpServerPid: null,
+          httpServerPort: null,
           isLoading: false,
         );
       } else {
@@ -82,12 +98,14 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
           serverId: _indexId,
           lynPath: _lynPath,
           indexPath: _indexPath,
-          port: _port,
+          port: 0,
         );
         final pid = _serverService.getHttpServerPid(_indexId);
+        final assignedPort = _serverService.getHttpServerPort(_indexId);
         state = state.copyWith(
           httpServerRunning: true,
           httpServerPid: pid,
+          httpServerPort: assignedPort,
           isLoading: false,
         );
       }
@@ -109,6 +127,7 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
         state = state.copyWith(
           mcpServerRunning: false,
           mcpServerPid: null,
+          mcpServerPort: null,
           isLoading: false,
         );
       } else {
@@ -116,11 +135,14 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
           serverId: _indexId,
           lynPath: _lynPath,
           indexPath: _indexPath,
+          port: 0,
         );
         final pid = _serverService.getMcpServerPid(_indexId);
+        final assignedPort = _serverService.getMcpServerPort(_indexId);
         state = state.copyWith(
           mcpServerRunning: true,
           mcpServerPid: pid,
+          mcpServerPort: assignedPort,
           isLoading: false,
         );
       }

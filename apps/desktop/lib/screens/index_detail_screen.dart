@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -217,10 +218,54 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                   ),
                   if (serverState.httpServerRunning) ...[
                     const SizedBox(height: 8),
-                    Text('Running on port ${config?.restPort ?? 8181}'),
                     Text(
-                      'Endpoint: http://localhost:${config?.restPort ?? 8181}/search',
+                      'Running on port ${serverState.httpServerPort ?? '-'}',
                     ),
+                    Text(
+                      'Endpoint: http://localhost:${serverState.httpServerPort ?? '-'}${serverState.httpServerPort != null ? '/search' : ''}',
+                    ),
+                    if (serverState.httpServerPort != null) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Example test URL: http://localhost:${serverState.httpServerPort}/search?q=test&max_results=3&context_window=300',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              iconSize: 16,
+                              tooltip: 'Copy example URL',
+                              onPressed: () {
+                                final exampleUrl =
+                                    'http://localhost:${serverState.httpServerPort}/search?q=test&max_results=3&context_window=300';
+                                FlutterClipboard.copy(exampleUrl);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Example URL copied'),
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.copy),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (serverState.httpServerPid != null)
                       Text('PID: ${serverState.httpServerPid}'),
                   ],
@@ -264,11 +309,29 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Text('Model Context Protocol for LLM integration'),
+                  const Text(
+                    'Model Context Protocol (JSON-RPC 2.0 over HTTP/SSE)',
+                  ),
                   if (serverState.mcpServerRunning &&
                       serverState.mcpServerPid != null) ...[
                     const SizedBox(height: 8),
+                    Text('Running on port ${serverState.mcpServerPort ?? '-'}'),
+                    Text(
+                      'JSON-RPC: http://localhost:${serverState.mcpServerPort ?? '-'}${serverState.mcpServerPort != null ? '/mcp' : ''}',
+                    ),
+                    Text(
+                      'SSE Stream: http://localhost:${serverState.mcpServerPort ?? '-'}${serverState.mcpServerPort != null ? '/mcp/sse' : ''}',
+                    ),
                     Text('PID: ${serverState.mcpServerPid}'),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _testMcpServer,
+                        icon: const Icon(Icons.bug_report_outlined),
+                        label: const Text('Test MCP'),
+                      ),
+                    ),
                   ],
                   if (serverState.error != null) ...[
                     const SizedBox(height: 8),
@@ -515,17 +578,155 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   }
 
   String _generateConfigJson() {
+    final config = ref.read(configProvider);
+    final serverState = ref.read(
+      indexServersProviderWithConfig((
+        id: widget.index.id?.toString() ?? 'unknown',
+        lynPath: widget.index.lynPath,
+        indexPath: widget.index.indexPath,
+        port: config?.restPort ?? 8181,
+      )),
+    );
+    final mcpPort = serverState.mcpServerPort;
+
     return '''
 {
   "mcpServers": {
     "lynsok": {
-      "command": "lynsok",
-      "args": ["mcp", "--index", "${widget.index.lynPath}"],
-      "env": {}
+      "type": "http",
+      "url": "http://localhost:${mcpPort ?? 0}/mcp"
     }
   }
 }
 ''';
+  }
+
+  Future<void> _testMcpServer() async {
+    final config = ref.read(configProvider);
+    final serverState = ref.read(
+      indexServersProviderWithConfig((
+        id: widget.index.id?.toString() ?? 'unknown',
+        lynPath: widget.index.lynPath,
+        indexPath: widget.index.indexPath,
+        port: config?.restPort ?? 8181,
+      )),
+    );
+
+    final port = serverState.mcpServerPort;
+    if (port == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Start MCP server first.')),
+        );
+      }
+      return;
+    }
+
+    final query = _searchController.text.trim().isEmpty
+        ? 'test'
+        : _searchController.text.trim();
+
+    final client = HttpClient();
+    try {
+      final endpoint = Uri.parse('http://localhost:$port/mcp');
+
+      final initResult = await _postJsonRpc(client, endpoint, {
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'initialize',
+        'params': {
+          'protocolVersion': '2024-11-05',
+          'capabilities': {},
+          'clientInfo': {'name': 'lynsok-desktop', 'version': '0.1.0'},
+        },
+      });
+
+      await _postJsonRpc(client, endpoint, {
+        'jsonrpc': '2.0',
+        'method': 'notifications/initialized',
+        'params': {},
+      });
+
+      final toolsResult = await _postJsonRpc(client, endpoint, {
+        'jsonrpc': '2.0',
+        'id': 2,
+        'method': 'tools/list',
+        'params': {},
+      });
+
+      final callResult = await _postJsonRpc(client, endpoint, {
+        'jsonrpc': '2.0',
+        'id': 3,
+        'method': 'tools/call',
+        'params': {
+          'name': 'lynsok.search',
+          'arguments': {
+            'query': query,
+            'max_results': 3,
+            'context_window': 500,
+          },
+        },
+      });
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('MCP Test Result'),
+          content: SizedBox(
+            width: 680,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                const JsonEncoder.withIndent('  ').convert({
+                  'initialize': initResult,
+                  'tools/list': toolsResult,
+                  'tools/call': callResult,
+                }),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('MCP test failed: $e')));
+      }
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<Map<String, dynamic>> _postJsonRpc(
+    HttpClient client,
+    Uri endpoint,
+    Map<String, dynamic> payload,
+  ) async {
+    final request = await client.postUrl(endpoint);
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode(payload));
+
+    final response = await request.close();
+    final body = await utf8.decoder.bind(response).join();
+    if (body.trim().isEmpty) {
+      return {'statusCode': response.statusCode};
+    }
+
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    return {'raw': decoded};
   }
 
   void _reindex() {
@@ -622,6 +823,19 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
             FilledButton(
               onPressed: () async {
                 try {
+                  final config = ref.read(configProvider);
+                  final serverNotifier = ref.read(
+                    indexServersProviderWithConfig((
+                      id: widget.index.id?.toString() ?? 'unknown',
+                      lynPath: widget.index.lynPath,
+                      indexPath: widget.index.indexPath,
+                      port: config?.restPort ?? 8181,
+                    )).notifier,
+                  );
+
+                  await serverNotifier.stopHttpServer();
+                  await serverNotifier.stopMcpServer();
+
                   // Delete .lyn and .idx files
                   final lynFile = File(widget.index.lynPath);
                   final idxFile = File(widget.index.indexPath);
