@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:desktop/models/index_model.dart';
 import 'package:desktop/providers/lynsok_provider.dart';
 import 'package:desktop/providers/server_process_provider.dart';
 import 'package:desktop/providers/index_provider.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:lynsok_core/lynsok_runner.dart';
+import 'package:path/path.dart' as p;
 
 class IndexDetailScreen extends ConsumerStatefulWidget {
   final IndexModel index;
@@ -23,24 +26,41 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
-  final TextEditingController _promptController = TextEditingController();
-  String _selectedLlm = 'ollama';
+  final ScrollController _previewScrollController = ScrollController();
+  final PdfViewerController _pdfViewerController = PdfViewerController();
   List<Map<String, dynamic>> _searchResults = [];
+  List<String> _queryTerms = [];
+  int _maxResults = 10;
+  Map<String, dynamic>? _selectedResult;
+  String? _previewText;
+  String? _previewError;
+  bool _previewLoading = false;
+  double? _pendingPreviewJumpFraction;
+  String? _pendingPdfSearchQuery;
+  late final PdfTextSearcher _pdfTextSearcher;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _promptController.text =
-        'You are a helpful assistant with access to local documents.';
+    _pdfTextSearcher = PdfTextSearcher(_pdfViewerController);
+    _pdfTextSearcher.addListener(_onPdfSearchStateChanged);
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
-    _promptController.dispose();
+    _previewScrollController.dispose();
+    _pdfTextSearcher.removeListener(_onPdfSearchStateChanged);
+    _pdfTextSearcher.dispose();
     super.dispose();
+  }
+
+  void _onPdfSearchStateChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -51,7 +71,7 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
-            Tab(text: 'Search & RAG'),
+            Tab(text: 'Search'),
             Tab(text: 'Connectivity'),
             Tab(text: 'Maintenance'),
           ],
@@ -74,92 +94,107 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Search bar
-          TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Enter search query...',
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.search),
-                onPressed: _performSearch,
-              ),
-            ),
-            onSubmitted: (_) => _performSearch(),
-          ),
-          const SizedBox(height: 16),
-
-          // Results list
-          Expanded(
-            child: _searchResults.isEmpty
-                ? const Center(child: Text('No results yet'))
-                : ListView.builder(
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final result = _searchResults[index];
-                      return ListTile(
-                        title: Text(result['title'] ?? 'Document'),
-                        subtitle: Text(
-                          result['snippet'] ?? '',
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onTap: () {
-                          // Open document viewer with the result
-                          _openDocumentViewer(
-                            result['path'] ?? '',
-                            result['title'] ?? 'Document',
-                            result['snippet'] ?? '',
-                          );
-                        },
-                      );
-                    },
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Enter search query...',
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.search),
+                      onPressed: _performSearch,
+                    ),
                   ),
-          ),
-
-          // RAG Panel
-          const Divider(),
-          const Text(
-            'RAG Configuration',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-
-          // LLM Dropdown
-          DropdownButtonFormField<String>(
-            initialValue: _selectedLlm,
-            decoration: const InputDecoration(labelText: 'LLM Provider'),
-            items: const [
-              DropdownMenuItem(value: 'ollama', child: Text('Ollama')),
-              DropdownMenuItem(value: 'openai', child: Text('OpenAI')),
+                  onSubmitted: (_) => _performSearch(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 120,
+                child: DropdownButtonFormField<int>(
+                  initialValue: _maxResults,
+                  decoration: const InputDecoration(labelText: 'Max results'),
+                  items: const [
+                    DropdownMenuItem(value: 5, child: Text('5')),
+                    DropdownMenuItem(value: 10, child: Text('10')),
+                    DropdownMenuItem(value: 20, child: Text('20')),
+                    DropdownMenuItem(value: 50, child: Text('50')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() => _maxResults = value);
+                  },
+                ),
+              ),
             ],
-            onChanged: (value) {
-              setState(() {
-                _selectedLlm = value!;
-              });
-            },
           ),
-
-          const SizedBox(height: 8),
-
-          // System Prompt Editor
-          TextField(
-            controller: _promptController,
-            decoration: const InputDecoration(
-              labelText: 'System Prompt',
-              border: OutlineInputBorder(),
-            ),
-            maxLines: 3,
-          ),
-
           const SizedBox(height: 16),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 980;
 
-          // Ask AI Button
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _askAI,
-              icon: const Icon(Icons.smart_toy),
-              label: const Text('Ask AI'),
+                final resultsPane = Card(
+                  child: _searchResults.isEmpty
+                      ? const Center(child: Text('No results yet'))
+                      : ListView.separated(
+                          itemCount: _searchResults.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final result = _searchResults[index];
+                            final selected = identical(_selectedResult, result);
+                            return ListTile(
+                              selected: selected,
+                              title: _buildHighlightedResultText(
+                                result['title']?.toString() ?? 'Document',
+                                baseStyle: Theme.of(
+                                  context,
+                                ).textTheme.titleMedium,
+                                maxLines: 1,
+                              ),
+                              subtitle: _buildHighlightedResultText(
+                                _stripHighlightMarkers(
+                                  result['snippet']?.toString() ?? '',
+                                ),
+                                baseStyle: Theme.of(
+                                  context,
+                                ).textTheme.bodyMedium,
+                                maxLines: 3,
+                              ),
+                              onTap: () => _onResultSelected(result),
+                            );
+                          },
+                        ),
+                );
+
+                final previewPane = Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: _buildPreviewPane(),
+                  ),
+                );
+
+                if (isNarrow) {
+                  return Column(
+                    children: [
+                      Expanded(child: resultsPane),
+                      const SizedBox(height: 12),
+                      Expanded(child: previewPane),
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(flex: 5, child: resultsPane),
+                    const SizedBox(width: 12),
+                    Expanded(flex: 6, child: previewPane),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -477,9 +512,7 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     if (_searchController.text.isEmpty) return;
 
     try {
-      final archiveFile = File(
-        widget.index.indexPath.replaceAll(RegExp(r'\.idx$'), '.lyn'),
-      );
+      final archiveFile = File(widget.index.lynPath);
       final searcher = LynSokSearcher(
         archiveFile: archiveFile,
         indexPath: widget.index.indexPath,
@@ -489,19 +522,30 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
       }
       final results = await searcher.indexedSearch(
         _searchController.text,
-        maxResults: 10,
+        maxResults: _maxResults,
         contextWindowBytes: 200,
       );
 
+      final queryTerms = _extractQueryTerms(_searchController.text);
+
       setState(() {
+        _queryTerms = queryTerms;
         _searchResults = results.map((result) {
           return {
             'title': result.path.split('/').last,
             'snippet': result.snippet,
             'path': result.path,
             'score': result.score,
+            'matchOffset': result.matchOffset,
           };
         }).toList();
+        _selectedResult = null;
+        _previewText = null;
+        _previewError = null;
+        _previewLoading = false;
+        _pendingPreviewJumpFraction = null;
+        _pendingPdfSearchQuery = null;
+        _pdfTextSearcher.resetTextSearch();
       });
     } catch (e) {
       if (mounted) {
@@ -512,69 +556,323 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     }
   }
 
-  void _askAI() async {
-    if (_searchResults.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please perform a search first')),
-        );
+  Future<void> _onResultSelected(Map<String, dynamic> result) async {
+    setState(() {
+      _selectedResult = result;
+      _previewText = null;
+      _previewError = null;
+      _previewLoading = false;
+      _pendingPreviewJumpFraction = null;
+    });
+
+    final path = (result['path'] as String?) ?? '';
+    final extension = p.extension(path).toLowerCase();
+
+    if (extension == '.txt' || extension == '.md') {
+      setState(() {
+        _previewLoading = true;
+        _pendingPdfSearchQuery = null;
+      });
+
+      try {
+        final file = File(path);
+        if (!await file.exists()) {
+          throw StateError('File not found: $path');
+        }
+
+        final content = await file.readAsString();
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _previewText = content;
+          _previewLoading = false;
+        });
+
+        _queuePreviewJump(result, content);
+      } catch (e) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _previewError = e.toString();
+          _previewLoading = false;
+        });
       }
       return;
     }
 
-    final llmConfig = ref.read(configProvider);
-    if (llmConfig == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('LLM configuration not found')),
-        );
-      }
+    if (extension == '.pdf') {
+      setState(() {
+        _pendingPdfSearchQuery = _searchController.text.trim();
+      });
+      _tryRunPdfSearch();
       return;
     }
 
-    try {
-      final client = LlmClient.fromConfig(llmConfig.llm);
+    _pdfTextSearcher.resetTextSearch();
+  }
 
-      // Build context from top 3 results
-      final contextText = _searchResults
-          .take(3)
-          .map((result) {
-            return '${result['title']}: ${result['snippet']}';
-          })
-          .join('\n\n');
+  void _queuePreviewJump(Map<String, dynamic> result, String content) {
+    if (content.isEmpty) {
+      return;
+    }
 
-      final userPrompt =
-          'Context:\n$contextText\n\nQuestion: ${_searchController.text}';
+    final rawOffset = result['matchOffset'];
+    final offset = rawOffset is int ? rawOffset : 0;
+    final boundedOffset = offset.clamp(0, content.length);
+    _pendingPreviewJumpFraction = boundedOffset / content.length;
 
-      final response = await client.generate(
-        systemPrompt: _promptController.text,
-        userPrompt: userPrompt,
-        maxTokens: 1000,
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _applyPendingPreviewJump();
+    });
+  }
+
+  void _applyPendingPreviewJump() {
+    if (!mounted) {
+      return;
+    }
+
+    final fraction = _pendingPreviewJumpFraction;
+    if (fraction == null) {
+      return;
+    }
+
+    if (!_previewScrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _applyPendingPreviewJump();
+      });
+      return;
+    }
+
+    final maxScrollExtent = _previewScrollController.position.maxScrollExtent;
+    final target = (maxScrollExtent * fraction).clamp(0.0, maxScrollExtent);
+    _previewScrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+    _pendingPreviewJumpFraction = null;
+  }
+
+  void _tryRunPdfSearch() {
+    if (!_pdfViewerController.isReady) {
+      return;
+    }
+
+    final query = (_pendingPdfSearchQuery ?? '').trim();
+    if (query.isEmpty) {
+      _pdfTextSearcher.resetTextSearch();
+      return;
+    }
+
+    _pdfTextSearcher.startTextSearch(
+      query,
+      caseInsensitive: true,
+      goToFirstMatch: true,
+    );
+  }
+
+  Widget _buildHighlightedResultText(
+    String text, {
+    required TextStyle? baseStyle,
+    required int maxLines,
+  }) {
+    return Text.rich(
+      _buildHighlightedSpan(text, baseStyle),
+      maxLines: maxLines,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  TextSpan _buildHighlightedSpan(String text, TextStyle? baseStyle) {
+    if (text.isEmpty || _queryTerms.isEmpty) {
+      return TextSpan(text: text, style: baseStyle);
+    }
+
+    final lowerText = text.toLowerCase();
+    final ranges = <(int, int)>[];
+    for (final term in _queryTerms) {
+      var start = 0;
+      while (true) {
+        final index = lowerText.indexOf(term, start);
+        if (index < 0) {
+          break;
+        }
+        ranges.add((index, index + term.length));
+        start = index + 1;
+      }
+    }
+
+    if (ranges.isEmpty) {
+      return TextSpan(text: text, style: baseStyle);
+    }
+
+    ranges.sort((a, b) => a.$1.compareTo(b.$1));
+    final merged = <(int, int)>[];
+    for (final range in ranges) {
+      if (merged.isEmpty || range.$1 > merged.last.$2) {
+        merged.add(range);
+        continue;
+      }
+      merged[merged.length - 1] = (
+        merged.last.$1,
+        range.$2 > merged.last.$2 ? range.$2 : merged.last.$2,
       );
+    }
 
-      // Show response in dialog
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('AI Response'),
-            content: SingleChildScrollView(child: Text(response)),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
+    final highlightStyle = (baseStyle ?? const TextStyle()).copyWith(
+      fontWeight: FontWeight.w700,
+      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+      color: Theme.of(context).colorScheme.onPrimaryContainer,
+    );
+
+    final spans = <InlineSpan>[];
+    var cursor = 0;
+    for (final range in merged) {
+      if (cursor < range.$1) {
+        spans.add(
+          TextSpan(text: text.substring(cursor, range.$1), style: baseStyle),
         );
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('AI request failed: $e')));
+      spans.add(
+        TextSpan(
+          text: text.substring(range.$1, range.$2),
+          style: highlightStyle,
+        ),
+      );
+      cursor = range.$2;
+    }
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor), style: baseStyle));
+    }
+
+    return TextSpan(children: spans, style: baseStyle);
+  }
+
+  String _stripHighlightMarkers(String text) {
+    return text.replaceAll('**', '');
+  }
+
+  List<String> _extractQueryTerms(String query) {
+    final matches = RegExp(r'\S+').allMatches(query.toLowerCase());
+    final terms = <String>{};
+    for (final match in matches) {
+      final token = query
+          .substring(match.start, match.end)
+          .toLowerCase()
+          .trim();
+      if (token.isNotEmpty) {
+        terms.add(token);
       }
     }
+    return terms.toList();
+  }
+
+  Widget _buildPreviewPane() {
+    if (_selectedResult == null) {
+      return const Center(
+        child: Text('Select a search result to preview the document.'),
+      );
+    }
+
+    final path = (_selectedResult!['path'] as String?) ?? '';
+    final extension = p.extension(path).toLowerCase();
+
+    if (_previewLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_previewError != null) {
+      return Center(child: Text('Preview error: $_previewError'));
+    }
+
+    if (extension == '.pdf') {
+      if (_pendingPdfSearchQuery != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _tryRunPdfSearch();
+        });
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Preview: ${_selectedResult!['title'] ?? p.basename(path)}',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: PdfViewer.file(
+              path,
+              controller: _pdfViewerController,
+              params: PdfViewerParams(
+                pagePaintCallbacks: [
+                  _pdfTextSearcher.pageTextMatchPaintCallback,
+                ],
+                matchTextColor: Theme.of(
+                  context,
+                ).colorScheme.secondaryContainer,
+                activeMatchTextColor: Theme.of(
+                  context,
+                ).colorScheme.primaryContainer,
+                onViewerReady: (document, controller) {
+                  _tryRunPdfSearch();
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (extension == '.txt' || extension == '.md') {
+      final content = _previewText ?? '';
+      if (_pendingPreviewJumpFraction != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _applyPendingPreviewJump();
+        });
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Preview: ${_selectedResult!['title'] ?? p.basename(path)}',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _previewScrollController,
+              child: extension == '.md'
+                  ? MarkdownBody(data: content)
+                  : SelectableText(
+                      content,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                    ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (extension == '.docx' || extension == '.doc') {
+      return Center(
+        child: Text(
+          'DOCX preview is not available in phase 1.\nPath: $path',
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+
+    return Center(
+      child: Text(
+        'Preview not supported for ${extension.isEmpty ? 'this file type' : extension}.\nPath: $path',
+        textAlign: TextAlign.center,
+      ),
+    );
   }
 
   String _generateConfigJson() {
@@ -876,36 +1174,5 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
         ),
       );
     }
-  }
-
-  void _openDocumentViewer(String path, String title, String snippet) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Source: $path',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(snippet, style: Theme.of(context).textTheme.bodyMedium),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
   }
 }

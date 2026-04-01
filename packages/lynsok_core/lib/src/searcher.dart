@@ -11,11 +11,13 @@ class SearchResult {
   final String path;
   final double score;
   final String snippet;
+  final int matchOffset;
 
   SearchResult({
     required this.path,
     required this.score,
     required this.snippet,
+    required this.matchOffset,
   });
 }
 
@@ -81,6 +83,7 @@ class LynSokSearcher {
             path: record['path'] as String,
             score: score.toDouble(),
             snippet: snippet,
+            matchOffset: matchOffset,
           ),
         );
       }
@@ -195,7 +198,14 @@ class LynSokSearcher {
         matchOffset,
         contextWindowBytes: contextWindowBytes,
       );
-      results.add(SearchResult(path: doc.path, score: score, snippet: snippet));
+      results.add(
+        SearchResult(
+          path: doc.path,
+          score: score,
+          snippet: snippet,
+          matchOffset: matchOffset,
+        ),
+      );
     }
 
     return results;
