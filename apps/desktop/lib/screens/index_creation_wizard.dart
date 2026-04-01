@@ -90,6 +90,7 @@ class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 10),
         TextField(
           controller: _nameController,
           decoration: const InputDecoration(
