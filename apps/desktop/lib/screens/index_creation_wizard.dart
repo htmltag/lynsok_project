@@ -145,23 +145,28 @@ class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
   Widget _buildStep3() {
     final indexingState = ref.watch(indexingProvider);
 
-    if (indexingState.isIndexing) {
-      return Column(
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text('Indexing: ${indexingState.currentFile}'),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(value: indexingState.progress),
-          Text('${(indexingState.progress * 100).toInt()}%'),
-        ],
-      );
-    }
+    final displayLines = indexingState.outputLines.isEmpty
+        ? indexingState.isIndexing
+              ? const [
+                  'Starting indexing process...',
+                  '',
+                  '(Waiting for output...)',
+                ]
+              : const ['Terminal output will appear here when indexing starts.']
+        : indexingState.outputLines.length > 8
+        ? indexingState.outputLines.sublist(
+            indexingState.outputLines.length - 8,
+          )
+        : indexingState.outputLines;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Ready to create index.'),
+        Text(
+          indexingState.isIndexing
+              ? 'Indexing in progress...'
+              : 'Ready to create index.',
+        ),
         const SizedBox(height: 16),
         Text('Name: ${_nameController.text}'),
         Text('Source: $_selectedPath'),
@@ -170,6 +175,44 @@ class _IndexCreationWizardState extends ConsumerState<IndexCreationWizard> {
           'Output (.idx): ${_outputLynPath == null ? '(not selected)' : '${_outputLynPath!}.idx'}',
         ),
         Text('Excludes: ${_excludePatterns.join(', ')}'),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          height: 168,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E1E),
+            border: Border.all(
+              color: indexingState.error != null
+                  ? Colors.red
+                  : const Color(0xFF444444),
+            ),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          padding: const EdgeInsets.all(10),
+          child: SingleChildScrollView(
+            reverse: true,
+            child: SelectionArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: displayLines
+                    .map(
+                      (line) => Text(
+                        line.isEmpty ? ' ' : line,
+                        style: TextStyle(
+                          color: indexingState.error != null
+                              ? const Color(0xFFFF8A80)
+                              : const Color(0xFF00FF66),
+                          fontSize: 12,
+                          fontFamily: 'Courier New',
+                          height: 1.4,
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }

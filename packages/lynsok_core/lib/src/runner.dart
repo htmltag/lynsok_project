@@ -34,6 +34,7 @@ class LynSokRunner {
   final String? compactOutput;
   final bool buildIndex;
   final String? indexOutput;
+  final void Function(String line)? onLog;
 
   LynSokRunner({
     required this.isolates,
@@ -44,14 +45,23 @@ class LynSokRunner {
     this.buildIndex = false,
     this.indexOutput,
     this.verbose = false,
+    this.onLog,
   });
+
+  void _log(String message) {
+    if (!verbose) {
+      return;
+    }
+    stdout.writeln(message);
+    onLog?.call(message);
+  }
 
   Future<int> run(String path) async {
     final pathType = DirectoryScanner.getPathType(path);
     final bool compactMode = compactOutput != null;
     String? outNorm;
     if (compactMode) {
-      if (verbose) stdout.writeln('Compact mode output path: $compactOutput');
+      _log('Compact mode output path: $compactOutput');
       outNorm = p.normalize(File(compactOutput!).absolute.path);
     }
 
@@ -105,11 +115,9 @@ class LynSokRunner {
       // avoid reading our own output file if it's inside the input tree
       if (compactMode && outNorm != null && chunkPath != null) {
         final cpNorm = p.normalize(File(chunkPath).absolute.path);
-        if (verbose) {
-          stdout.writeln('skip check: cpNorm=$cpNorm ; outNorm=$outNorm');
-        }
+        _log('skip check: cpNorm=$cpNorm ; outNorm=$outNorm');
         if (cpNorm == outNorm) {
-          if (verbose) stdout.writeln('skipping archive file');
+          _log('skipping archive file');
           continue;
         }
       }
@@ -119,20 +127,14 @@ class LynSokRunner {
         final data = ttd.materialize().asUint8List();
         fileType = FileSniffer.detect(data);
         chunk['data'] = TransferableTypedData.fromList([data]);
-        if (verbose) {
-          stdout.writeln('Detected file type: $fileType for path $chunkPath');
-        }
+        _log('Detected file type: $fileType for path $chunkPath');
 
         if (compactMode && chunkPath != null) {
           // start a new record for this file; do it under lock
           await rafLock.synchronized(() async {
             final bodyOffset = await writeRecordHeader(raf, chunkPath);
             activeRecords[chunkPath] = _RecordState(chunkPath, bodyOffset);
-            if (verbose) {
-              stdout.writeln(
-                'Started archive record for $chunkPath at offset $bodyOffset',
-              );
-            }
+            _log('Started archive record for $chunkPath at offset $bodyOffset');
           });
         }
       }
@@ -161,19 +163,15 @@ class LynSokRunner {
                 final state = activeRecords[chunkPath]!;
                 // perform all RAF operations under lock to avoid conflicts
                 await rafLock.synchronized(() async {
-                  if (verbose) {
-                    stdout.writeln(
-                      '  writing ${extractedData.length} bytes for $chunkPath',
-                    );
-                  }
+                  _log(
+                    '  writing ${extractedData.length} bytes for $chunkPath',
+                  );
                   await raf.writeFrom(extractedData);
                   state.totalBodyBytes += extractedData.length;
                   if (isLastChunk && !state.headerPatched) {
-                    if (verbose) {
-                      stdout.writeln(
-                        '  patching length ${state.totalBodyBytes} for $chunkPath',
-                      );
-                    }
+                    _log(
+                      '  patching length ${state.totalBodyBytes} for $chunkPath',
+                    );
                     final curPos = await raf.position();
                     await patchBodyLength(
                       raf,
@@ -183,13 +181,13 @@ class LynSokRunner {
                     // restore position so we are at end before writing ETX
                     await raf.setPosition(curPos);
                     state.headerPatched = true;
-                    if (verbose) stdout.writeln('  writing ETX for $chunkPath');
+                    _log('  writing ETX for $chunkPath');
                     await raf.writeByte(etx);
                   }
                 });
               }
             } else {
-              stdout.writeln('Chunk ${r.id} => ${r.patternCounts}');
+              _log('Chunk ${r.id} => ${r.patternCounts}');
               r.patternCounts.forEach((label, count) {
                 totalMatches[label] = (totalMatches[label] ?? 0) + count;
               });
@@ -210,7 +208,7 @@ class LynSokRunner {
     await Future.wait(active);
     await pool.stop();
     if (compactMode) {
-      stdout.writeln('Active records tracked: ${activeRecords.keys.toList()}');
+      _log('Active records tracked: ${activeRecords.keys.toList()}');
     }
 
     if (compactMode) {
@@ -253,13 +251,11 @@ class LynSokRunner {
         }
 
         await index.saveTo(idxFile);
-        if (verbose) stdout.writeln('Wrote index to $idxPath');
+        _log('Wrote index to $idxPath');
       }
 
       if (verbose) {
-        stdout.writeln(
-          'Active records tracked: ${activeRecords.keys.toList()}',
-        );
+        _log('Active records tracked: ${activeRecords.keys.toList()}');
       }
     }
 

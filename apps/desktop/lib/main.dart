@@ -21,7 +21,7 @@ class LynSokDesktopApp extends StatelessWidget {
       title: 'LynSøk Desktop',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       home: const SplashScreen(),
       debugShowCheckedModeBanner: false,
     );
