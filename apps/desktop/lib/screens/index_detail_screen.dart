@@ -30,6 +30,7 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   List<Map<String, dynamic>> _searchResults = [];
   List<String> _queryTerms = [];
   int _maxResults = 10;
+  int _contextWindow = 500;
   int? _lastSearchDurationMs;
   Map<String, dynamic>? _selectedResult;
   String? _previewText;
@@ -142,6 +143,34 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                     }
                     setState(() => _maxResults = value);
                   },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Context window: $_contextWindow',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    Slider(
+                      value: _contextWindow.toDouble(),
+                      min: 300,
+                      max: 2000,
+                      divisions: 17,
+                      label: _contextWindow.toString(),
+                      onChanged: (value) {
+                        setState(() => _contextWindow = value.round());
+                      },
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -613,12 +642,12 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
           ? await searcher.indexedSearch(
               _searchController.text,
               maxResults: _maxResults,
-              contextWindowBytes: 200,
+              contextWindowBytes: _contextWindow,
             )
           : await searcher.rawSearch(
               _searchController.text,
               maxResults: _maxResults,
-              contextWindowBytes: 200,
+              contextWindowBytes: _contextWindow,
             );
       stopwatch.stop();
 
