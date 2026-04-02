@@ -27,6 +27,8 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _previewScrollController = ScrollController();
   final PdfViewerController _pdfViewerController = PdfViewerController();
+  final ScrollController _connectivityScrollController = ScrollController();
+  final ScrollController _maintenanceScrollController = ScrollController();
   List<Map<String, dynamic>> _searchResults = [];
   List<String> _queryTerms = [];
   int _maxResults = 10;
@@ -42,6 +44,10 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   bool _isSearcherWarming = false;
   Future<void>? _searcherWarmup;
   String? _searcherWarmError;
+  bool _showConnectivityTopFade = false;
+  bool _showConnectivityBottomFade = false;
+  bool _showMaintenanceTopFade = false;
+  bool _showMaintenanceBottomFade = false;
 
   @override
   void initState() {
@@ -50,6 +56,13 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     _pdfTextSearcher = PdfTextSearcher(_pdfViewerController);
     _pdfTextSearcher.addListener(_onPdfSearchStateChanged);
     _searcherWarmup = _warmSearcher();
+    _connectivityScrollController.addListener(_updateConnectivityFades);
+    _maintenanceScrollController.addListener(_updateMaintenanceFades);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateConnectivityFades();
+      _updateMaintenanceFades();
+    });
   }
 
   @override
@@ -57,6 +70,10 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     _tabController.dispose();
     _searchController.dispose();
     _previewScrollController.dispose();
+    _connectivityScrollController.removeListener(_updateConnectivityFades);
+    _maintenanceScrollController.removeListener(_updateMaintenanceFades);
+    _connectivityScrollController.dispose();
+    _maintenanceScrollController.dispose();
     _pdfTextSearcher.removeListener(_onPdfSearchStateChanged);
     _pdfTextSearcher.dispose();
     super.dispose();
@@ -66,6 +83,61 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _updateConnectivityFades() {
+    if (!_connectivityScrollController.hasClients || !mounted) {
+      return;
+    }
+
+    final position = _connectivityScrollController.position;
+    final showTop = position.pixels > 4;
+    final showBottom = position.pixels < position.maxScrollExtent - 4;
+
+    if (showTop != _showConnectivityTopFade ||
+        showBottom != _showConnectivityBottomFade) {
+      setState(() {
+        _showConnectivityTopFade = showTop;
+        _showConnectivityBottomFade = showBottom;
+      });
+    }
+  }
+
+  void _updateMaintenanceFades() {
+    if (!_maintenanceScrollController.hasClients || !mounted) {
+      return;
+    }
+
+    final position = _maintenanceScrollController.position;
+    final showTop = position.pixels > 4;
+    final showBottom = position.pixels < position.maxScrollExtent - 4;
+
+    if (showTop != _showMaintenanceTopFade ||
+        showBottom != _showMaintenanceBottomFade) {
+      setState(() {
+        _showMaintenanceTopFade = showTop;
+        _showMaintenanceBottomFade = showBottom;
+      });
+    }
+  }
+
+  Widget _buildScrollFade({required BuildContext context, required bool top}) {
+    final baseColor = Theme.of(context).scaffoldBackgroundColor;
+    return IgnorePointer(
+      child: Container(
+        height: 18,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: top ? Alignment.topCenter : Alignment.bottomCenter,
+            end: top ? Alignment.bottomCenter : Alignment.topCenter,
+            colors: [
+              baseColor.withValues(alpha: 0.92),
+              baseColor.withValues(alpha: 0.0),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -305,287 +377,335 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
       )).notifier,
     );
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // HTTP Server
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        'HTTP Server',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const Spacer(),
-                      Switch(
-                        value: serverState.httpServerRunning,
-                        onChanged: serverState.isLoading
-                            ? null
-                            : (_) => serverNotifier.toggleHttpServer(),
-                      ),
-                    ],
-                  ),
-                  if (serverState.httpServerRunning) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Running on port ${serverState.httpServerPort ?? '-'}',
+    return Stack(
+      children: [
+        ListView(
+          controller: _connectivityScrollController,
+          padding: const EdgeInsets.all(16),
+          children: [
+            // HTTP Server
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'HTTP Server',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        Switch(
+                          value: serverState.httpServerRunning,
+                          onChanged: serverState.isLoading
+                              ? null
+                              : (_) => serverNotifier.toggleHttpServer(),
+                        ),
+                      ],
                     ),
-                    Text(
-                      'Endpoint: http://localhost:${serverState.httpServerPort ?? '-'}${serverState.httpServerPort != null ? '/search' : ''}',
-                    ),
-                    if (serverState.httpServerPort != null) ...[
-                      const SizedBox(height: 6),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Example test URL: http://localhost:${serverState.httpServerPort}/search?q=test&max_results=3&context_window=300',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              iconSize: 16,
-                              tooltip: 'Copy example URL',
-                              onPressed: () {
-                                final exampleUrl =
-                                    'http://localhost:${serverState.httpServerPort}/search?q=test&max_results=3&context_window=300';
-                                FlutterClipboard.copy(exampleUrl);
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Example URL copied'),
+                    if (serverState.httpServerRunning) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Running on port ${serverState.httpServerPort ?? '-'}',
+                      ),
+                      Text(
+                        'Endpoint: http://localhost:${serverState.httpServerPort ?? '-'}${serverState.httpServerPort != null ? '/search' : ''}',
+                      ),
+                      if (serverState.httpServerPort != null) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Example test URL: http://localhost:${serverState.httpServerPort}/search?q=test&max_results=3&context_window=300',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
                                     ),
-                                  );
-                                }
-                              },
-                              icon: const Icon(Icons.copy),
+                              ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 6),
+                            SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                iconSize: 16,
+                                tooltip: 'Copy example URL',
+                                onPressed: () {
+                                  final exampleUrl =
+                                      'http://localhost:${serverState.httpServerPort}/search?q=test&max_results=3&context_window=300';
+                                  FlutterClipboard.copy(exampleUrl);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Example URL copied'),
+                                      ),
+                                    );
+                                  }
+                                },
+                                icon: const Icon(Icons.copy),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      if (serverState.httpServerPid != null)
+                        Text('PID: ${serverState.httpServerPid}'),
+                    ],
+                    if (serverState.error != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        serverState.error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
-                    if (serverState.httpServerPid != null)
-                      Text('PID: ${serverState.httpServerPid}'),
                   ],
-                  if (serverState.error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      serverState.error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ],
+                ),
               ),
             ),
-          ),
 
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          // MCP Server
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        'MCP Server',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+            // MCP Server
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'MCP Server',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        Switch(
+                          value: serverState.mcpServerRunning,
+                          onChanged: serverState.isLoading
+                              ? null
+                              : (_) => serverNotifier.toggleMcpServer(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Model Context Protocol (JSON-RPC 2.0 over HTTP/SSE)',
+                    ),
+                    if (serverState.mcpServerRunning &&
+                        serverState.mcpServerPid != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Running on port ${serverState.mcpServerPort ?? '-'}',
                       ),
-                      const Spacer(),
-                      Switch(
-                        value: serverState.mcpServerRunning,
-                        onChanged: serverState.isLoading
-                            ? null
-                            : (_) => serverNotifier.toggleMcpServer(),
+                      Text(
+                        'JSON-RPC: http://localhost:${serverState.mcpServerPort ?? '-'}${serverState.mcpServerPort != null ? '/mcp' : ''}',
+                      ),
+                      Text(
+                        'SSE Stream: http://localhost:${serverState.mcpServerPort ?? '-'}${serverState.mcpServerPort != null ? '/mcp/sse' : ''}',
+                      ),
+                      Text('PID: ${serverState.mcpServerPid}'),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _testMcpServer,
+                          icon: const Icon(Icons.bug_report_outlined),
+                          label: const Text('Test MCP'),
+                        ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Model Context Protocol (JSON-RPC 2.0 over HTTP/SSE)',
-                  ),
-                  if (serverState.mcpServerRunning &&
-                      serverState.mcpServerPid != null) ...[
+                    if (serverState.error != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        serverState.error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Config Helper
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'LLM Configuration',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 8),
-                    Text('Running on port ${serverState.mcpServerPort ?? '-'}'),
-                    Text(
-                      'JSON-RPC: http://localhost:${serverState.mcpServerPort ?? '-'}${serverState.mcpServerPort != null ? '/mcp' : ''}',
+                    const Text('Copy this configuration for Claude/Cursor:'),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: SelectableText(_generateConfigJson()),
                     ),
-                    Text(
-                      'SSE Stream: http://localhost:${serverState.mcpServerPort ?? '-'}${serverState.mcpServerPort != null ? '/mcp/sse' : ''}',
-                    ),
-                    Text('PID: ${serverState.mcpServerPid}'),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: _testMcpServer,
-                        icon: const Icon(Icons.bug_report_outlined),
-                        label: const Text('Test MCP'),
-                      ),
-                    ),
-                  ],
-                  if (serverState.error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      serverState.error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Config Helper
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'LLM Configuration',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('Copy this configuration for Claude/Cursor:'),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: SelectableText(_generateConfigJson()),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        FlutterClipboard.copy(_generateConfigJson());
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Configuration copied to clipboard',
+                        onPressed: () {
+                          FlutterClipboard.copy(_generateConfigJson());
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Configuration copied to clipboard',
+                                ),
                               ),
-                            ),
-                          );
-                        }
-                      },
-                      icon: const Icon(Icons.copy),
-                      label: const Text('Copy to Clipboard'),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Copy to Clipboard'),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
+          ],
+        ),
+        if (_showConnectivityTopFade)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: _buildScrollFade(context: context, top: true),
           ),
-        ],
-      ),
+        if (_showConnectivityBottomFade)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _buildScrollFade(context: context, top: false),
+          ),
+      ],
     );
   }
 
   Widget _buildMaintenanceTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Stats
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Index Statistics',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text('Source Path: ${widget.index.sourcePath}'),
-                  Text('File Count: ${widget.index.fileCount}'),
-                  Text('Total Size: ${widget.index.totalSize}'),
-                  Text('Created: ${widget.index.createdAt}'),
-                ],
+    final fileTypeStats = ref.watch(
+      indexFileTypeStatsProvider(widget.index.indexPath),
+    );
+    final fallbackFileCount = fileTypeStats.asData?.value.totalDocuments ?? 0;
+    final effectiveFileCount = widget.index.fileCount > 0
+        ? widget.index.fileCount
+        : fallbackFileCount;
+
+    return Stack(
+      children: [
+        ListView(
+          controller: _maintenanceScrollController,
+          padding: const EdgeInsets.all(16),
+          children: [
+            // Stats
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Index Statistics',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text('Source Path: ${widget.index.sourcePath}'),
+                    Text(
+                      effectiveFileCount > 0
+                          ? 'File Count: $effectiveFileCount'
+                          : fileTypeStats.isLoading
+                          ? 'File Count: Calculating...'
+                          : 'File Count: 0',
+                    ),
+                    Text('Index Path: ${widget.index.indexPath}'),
+                    Text('Created: ${widget.index.createdAt}'),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          // Actions
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Actions',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _reindex,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Re-index'),
+            // Actions
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Actions',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _deleteIndex,
-                      icon: const Icon(Icons.delete, color: Colors.white),
-                      label: const Text('Delete Index'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.red,
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _reindex,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Re-index'),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _deleteIndex,
+                        icon: const Icon(Icons.delete, color: Colors.white),
+                        label: const Text('Delete Index'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
+          ],
+        ),
+        if (_showMaintenanceTopFade)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: _buildScrollFade(context: context, top: true),
           ),
-        ],
-      ),
+        if (_showMaintenanceBottomFade)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _buildScrollFade(context: context, top: false),
+          ),
+      ],
     );
   }
 
