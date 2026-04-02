@@ -7,7 +7,7 @@ import 'package:desktop/widgets/index_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-enum _SidebarSection { dashboard, indexManager, aiSettings }
+enum _SidebarSection { dashboard }
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -24,20 +24,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final indexState = ref.watch(indexProvider);
     final themeMode = ref.watch(themeModeProvider);
 
-    final title = switch (_selectedSection) {
-      _SidebarSection.dashboard => 'Dashboard',
-      _SidebarSection.indexManager => 'Index Manager',
-      _SidebarSection.aiSettings => 'AI Settings',
-    };
-
-    final subtitle = switch (_selectedSection) {
-      _SidebarSection.dashboard =>
-        'Manage your local search indices and archives',
-      _SidebarSection.indexManager =>
-        'Create, open, and synchronize index archives',
-      _SidebarSection.aiSettings =>
-        'Configure local LLM providers and assistant prompts',
-    };
+    const title = 'Dashboard';
+    const subtitle = 'Manage your local search indices and archives';
 
     return Scaffold(
       body: Row(
@@ -107,15 +95,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ),
                 ),
                 Expanded(
-                  child: switch (_selectedSection) {
-                    _SidebarSection.dashboard || _SidebarSection.indexManager =>
-                      indexState.indexes.isEmpty
-                          ? _buildEmptyState(context)
-                          : _buildIndexGrid(context, indexState.indexes),
-                    _SidebarSection.aiSettings => _buildAiSettingsPlaceholder(
-                      context,
-                    ),
-                  },
+                  child: indexState.indexes.isEmpty
+                      ? _buildEmptyState(context)
+                      : _buildIndexGrid(context, indexState.indexes),
                 ),
               ],
             ),
@@ -240,45 +222,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
     );
   }
-
-  Widget _buildAiSettingsPlaceholder(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.auto_awesome_rounded,
-                    color: Theme.of(context).colorScheme.primary,
-                    size: 34,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'AI Settings',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Provider configuration can be managed from each index detail page under Search & RAG.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _DesktopSidebar extends StatelessWidget {
@@ -300,8 +243,6 @@ class _DesktopSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final sections = [
       (_SidebarSection.dashboard, 'Dashboard', Icons.dashboard_outlined),
-      (_SidebarSection.indexManager, 'Index Manager', Icons.storage_outlined),
-      (_SidebarSection.aiSettings, 'AI Settings', Icons.auto_awesome_outlined),
     ];
 
     return Container(
