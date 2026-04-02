@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:convert';
 import '../core/file_types.dart';
+import 'pdf_text_extractor.dart';
+
+const int _maxParserPdfBytes = 80 * 1024 * 1024;
 
 /// Entrypoint for extraction; returns only clean text.
 Uint8List extractFromChunk(
@@ -12,12 +16,45 @@ Uint8List extractFromChunk(
 ) {
   Uint8List raw;
   if (fileType == FileType.pdf) {
-    raw = _extractPdfStreams(bytes, start, end);
+    final pdfSlice = bytes.sublist(start, end);
+    final parserExtracted = extractPdfTextWithLibrary(pdfSlice);
+    raw = parserExtracted.isNotEmpty
+        ? parserExtracted
+        : _extractPdfStreams(bytes, start, end);
   } else if (fileType == FileType.docx) {
     raw = _extractDocxText(bytes, start, end);
   } else {
     raw = bytes.sublist(start, end);
   }
+  return _ensureUtf8(raw);
+}
+
+Future<Uint8List> extractFromChunkRobust(
+  Uint8List bytes,
+  int start,
+  int end,
+  FileType fileType,
+) async {
+  if (fileType != FileType.pdf) {
+    return extractFromChunk(bytes, start, end, fileType);
+  }
+
+  final pdfSlice = bytes.sublist(start, end);
+  Uint8List raw;
+
+  if (pdfSlice.length <= _maxParserPdfBytes) {
+    final parserExtracted = await extractPdfTextWithLibraryWithTimeout(
+      pdfSlice,
+      timeout: const Duration(seconds: 15),
+      maxPages: 400,
+    );
+    raw = parserExtracted.isNotEmpty
+        ? parserExtracted
+        : _extractPdfStreams(bytes, start, end);
+  } else {
+    raw = _extractPdfStreams(bytes, start, end);
+  }
+
   return _ensureUtf8(raw);
 }
 
@@ -80,6 +117,15 @@ Uint8List _extractPdfStreams(Uint8List source, int start, int end) {
           final cleanText = _parsePdfContent(decompressed);
           if (cleanText.isNotEmpty) {
             output.addAll(utf8.encode('$cleanText '));
+          } else {
+            final fallbackBytes = _ensureUtf8(decompressed);
+            final fallbackText = utf8
+                .decode(fallbackBytes, allowMalformed: true)
+                .replaceAll(RegExp(r'\s+'), ' ')
+                .trim();
+            if (fallbackText.isNotEmpty) {
+              output.addAll(utf8.encode('$fallbackText '));
+            }
           }
         }
       }
@@ -103,13 +149,20 @@ String _parsePdfContent(Uint8List decompressed) {
 
     // Fix Octal: \323 -> Ó
     text = text.replaceAllMapped(RegExp(r'\\(\d{1,3})'), (m) {
-      try { return String.fromCharCode(int.parse(m.group(1)!, radix: 8)); } catch (_) { return ''; }
+      try {
+        return String.fromCharCode(int.parse(m.group(1)!, radix: 8));
+      } catch (_) {
+        return '';
+      }
     });
 
-    text = text.replaceAll(r'\(', '(').replaceAll(r'\)', ')').replaceAll(r'\\', r'\');
-    
-    // Only add if it actually looks like text (prevents binary junk)
-    if (RegExp(r'[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]').hasMatch(text)) {
+    text = text
+        .replaceAll(r'\(', '(')
+        .replaceAll(r'\)', ')')
+        .replaceAll(r'\\', r'\');
+
+    // Keep readable text and skip empty captures.
+    if (text.trim().isNotEmpty) {
       buffer.write('$text ');
     }
   }
@@ -123,17 +176,31 @@ String _parsePdfContent(Uint8List decompressed) {
       for (int i = 0; i < hex.length; i += 2) {
         hexBytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
       }
-      
+
       // Try UTF-16BE (Common in modern/technical PDFs)
       if (hexBytes.length >= 2 && hexBytes[0] == 0x00) {
-          buffer.write('${String.fromCharCodes(hexBytes)} ');
+        buffer.write('${String.fromCharCodes(hexBytes)} ');
       } else {
-         buffer.write('${utf8.decode(hexBytes, allowMalformed: true)} ');
+        buffer.write('${utf8.decode(hexBytes, allowMalformed: true)} ');
       }
     } catch (_) {}
   }
 
-  return buffer.toString().trim();
+  final parsed = buffer.toString().trim();
+  if (parsed.isNotEmpty) {
+    return parsed;
+  }
+
+  // Fallback for simple/unstructured streams that still contain plain text.
+  final fallback = content
+      .replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (RegExp(r'[A-Za-z0-9]').hasMatch(fallback)) {
+    return fallback;
+  }
+
+  return '';
 }
 
 Uint8List _extractDocxText(Uint8List bytes, int start, int end) {
@@ -182,6 +249,7 @@ String _cleanXml(String input) {
     RegExp(r'<w:binData[^>]*>.*?</w:binData>', dotAll: true),
     '',
   );
+  cleaned = cleaned.replaceAll(RegExp(r'\b[A-Za-z0-9+/]{120,}={0,2}\b'), ' ');
   cleaned = cleaned.replaceAll(RegExp(r'<[^>]*>'), ' ');
   return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
 }

@@ -18,11 +18,14 @@ import 'message_types.dart';
 /// await pool.stop();
 /// ```
 class IsolatePool {
+  static const Duration _taskTimeout = Duration(seconds: 45);
+
   final int size;
   final _workerPorts = <int, SendPort>{};
   final _isolates = <Isolate>[];
   final _pending = <Map<String, dynamic>>[];
   final _completers = <int, Completer<ResultTask>>{};
+  final _taskPaths = <int, String?>{};
   final _receivePort = ReceivePort();
   int _nextWorker = 0;
   int _taskId = 0;
@@ -64,6 +67,7 @@ class IsolatePool {
             ? message['extracted'] as TransferableTypedData
             : null;
         final completer = _completers.remove(id);
+        _taskPaths.remove(id);
         if (completer != null) {
           completer.complete(
             ResultTask(id, patternCounts, executionMs, extracted),
@@ -78,6 +82,7 @@ class IsolatePool {
         stderr.writeln('Worker error for task $id: $error');
         if (id != null) {
           final completer = _completers.remove(id);
+          _taskPaths.remove(id);
           if (completer != null) {
             completer.completeError(Exception('Worker error: $error'));
           }
@@ -91,6 +96,7 @@ class IsolatePool {
     final id = _taskId++;
     final completer = Completer<ResultTask>();
     _completers[id] = completer;
+    _taskPaths[id] = payload['path'] as String?;
 
     final work = <String, dynamic>{'type': 'work', 'id': id};
     work.addAll(payload);
@@ -104,7 +110,21 @@ class IsolatePool {
       port.send(work);
     }
 
-    return completer.future;
+    return completer.future.timeout(
+      _taskTimeout,
+      onTimeout: () {
+        _completers.remove(id);
+        final path = _taskPaths.remove(id);
+        stderr.writeln(
+          'Worker task timed out for ${path ?? 'unknown path'} (task $id).',
+        );
+        return ResultTask(
+          id,
+          <String, int>{},
+          _taskTimeout.inMilliseconds.toDouble(),
+        );
+      },
+    );
   }
 
   Future<void> stop() async {

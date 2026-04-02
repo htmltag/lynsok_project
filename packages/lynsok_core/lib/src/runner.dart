@@ -147,6 +147,7 @@ class LynSokRunner {
         'caseInsensitive': caseInsensitive,
         'isJsonMode': jsonMode,
         'fileType': fileType.index,
+        'path': chunkPath,
       };
       if (compactMode) {
         workPayload['mode'] = 'compact';

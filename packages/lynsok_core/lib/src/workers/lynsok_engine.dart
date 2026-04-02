@@ -10,7 +10,7 @@ void logProcessorEntryPoint(SendPort supervisorPort) {
   final rp = ReceivePort();
   supervisorPort.send({'type': 'workerReady', 'port': rp.sendPort});
 
-  rp.listen((message) {
+  rp.listen((message) async {
     if (message is! Map || message['type'] != 'work') return;
 
     try {
@@ -59,7 +59,12 @@ void logProcessorEntryPoint(SendPort supervisorPort) {
 
       if (mode == 'compact') {
         // simply extract text and send it back
-        final extracted = extractFromChunk(bytes, start, end, fileType);
+        final extracted = await extractFromChunkRobust(
+          bytes,
+          start,
+          end,
+          fileType,
+        );
         supervisorPort.send({
           'type': 'result',
           'id': message['id'],

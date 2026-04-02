@@ -13,6 +13,8 @@ import '../connectors/file_connector.dart';
 /// }
 /// ```
 class DirectoryConnector {
+  static const int _maxFullBinaryReadBytes = 100 * 1024 * 1024;
+
   final String path;
   final int chunkSize;
 
@@ -32,7 +34,7 @@ class DirectoryConnector {
       if (lowerPath.endsWith('.pdf') || lowerPath.endsWith('.docx')) {
         try {
           final int length = await file.length();
-          if (length > 0) {
+          if (length > 0 && length <= _maxFullBinaryReadBytes) {
             currentChunkSize = length;
           }
         } catch (_) {}

@@ -20,7 +20,7 @@ dependencies:
   cli_util: ^0.4.2
   console: ^4.1.0
   path: ^1.9.1
-  archive: ^3.5.1
+  archive: ^4.0.2
   synchronized: ^3.0.0
   shelf: ^1.4.2
   shelf_router: ^1.0.4
