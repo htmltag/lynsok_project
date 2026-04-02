@@ -50,7 +50,7 @@ class _LynSokDesktopAppState extends ConsumerState<LynSokDesktopApp>
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp(
-      title: 'LynSøk Desktop',
+      title: 'LynSok',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,

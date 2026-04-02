@@ -1,10 +1,10 @@
-﻿# ⚡ LynSøk (Lyn-Sok)
+﻿# ⚡ LynSok (Lyn-Sok)
 **Instant, local-first context for AI—without the vector bloat.**
 
-LynSøk (Norwegian for Lightning Search) is a high-performance retrieval engine designed to bridge the gap between massive private document archives and Large Language Models. Built in Dart for native performance, it provides the "Ground Truth" for your AI agents at hardware-accelerated speeds.
+LynSok (Norwegian for Lightning Search) is a high-performance retrieval engine designed to bridge the gap between massive private document archives and Large Language Models. Built in Dart for native performance, it provides the "Ground Truth" for your AI agents at hardware-accelerated speeds.
 
-## Why LynSøk?
-In a world of complex cloud-based vector databases, LynSøk takes a different path: **Extreme efficiency through local indexing.**
+## Why LynSok?
+In a world of complex cloud-based vector databases, LynSok takes a different path: **Extreme efficiency through local indexing.**
 
 🚀 **Native Speed:** Optimized binary seeking and Logical Block Addressing (LBA) allow for sub-second retrieval from gigabyte-scale archives.
 
@@ -12,12 +12,12 @@ In a world of complex cloud-based vector databases, LynSøk takes a different pa
 
 📦 **The .lyn Format:** A custom, portable binary format that packs raw text and high-speed BM25 metadata into a single, seek-optimized file.
 
-🧠 **Smart Context:** Unlike simple keyword search, LynSøk respects document boundaries, delivering "Smart Chunks" (coherent paragraphs) that LLMs can actually understand.
+🧠 **Smart Context:** Unlike simple keyword search, LynSok respects document boundaries, delivering "Smart Chunks" (coherent paragraphs) that LLMs can actually understand.
 
 🔌 **MCP Ready:** Native support for the Model Context Protocol. Connect your private knowledge base to Claude, Cursor, or any modern AI IDE in seconds.
 
 ## The Architecture
-LynSøk is now organized as a Dart workspace monorepo with shared core logic and multiple app surfaces:
+LynSok is now organized as a Dart workspace monorepo with shared core logic and multiple app surfaces:
 
 **Core Engine (`packages/lynsok_core`):** Ingestion, extraction, archive format, indexing, search, config, and LLM client integrations.
 

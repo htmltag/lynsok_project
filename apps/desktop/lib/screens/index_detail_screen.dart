@@ -10,7 +10,6 @@ import 'package:desktop/providers/lynsok_provider.dart';
 import 'package:desktop/providers/server_process_provider.dart';
 import 'package:desktop/providers/index_provider.dart';
 import 'package:clipboard/clipboard.dart';
-import 'package:lynsok_core/lynsok_runner.dart';
 import 'package:path/path.dart' as p;
 
 class IndexDetailScreen extends ConsumerStatefulWidget {
@@ -31,6 +30,7 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   List<Map<String, dynamic>> _searchResults = [];
   List<String> _queryTerms = [];
   int _maxResults = 10;
+  int? _lastSearchDurationMs;
   Map<String, dynamic>? _selectedResult;
   String? _previewText;
   String? _previewError;
@@ -38,6 +38,9 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   double? _pendingPreviewJumpFraction;
   String? _pendingPdfSearchQuery;
   late final PdfTextSearcher _pdfTextSearcher;
+  bool _isSearcherWarming = false;
+  Future<void>? _searcherWarmup;
+  String? _searcherWarmError;
 
   @override
   void initState() {
@@ -45,6 +48,7 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     _tabController = TabController(length: 3, vsync: this);
     _pdfTextSearcher = PdfTextSearcher(_pdfViewerController);
     _pdfTextSearcher.addListener(_onPdfSearchStateChanged);
+    _searcherWarmup = _warmSearcher();
   }
 
   @override
@@ -101,12 +105,23 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                   controller: _searchController,
                   decoration: InputDecoration(
                     hintText: 'Enter search query...',
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.search),
-                      onPressed: _performSearch,
-                    ),
+                    suffixIcon: _isSearcherWarming
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.search),
+                            onPressed: _performSearch,
+                          ),
                   ),
-                  onSubmitted: (_) => _performSearch(),
+                  onSubmitted: _isSearcherWarming
+                      ? null
+                      : (_) => _performSearch(),
                 ),
               ),
               const SizedBox(width: 12),
@@ -132,6 +147,43 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
             ],
           ),
           const SizedBox(height: 16),
+          if (_isSearcherWarming) ...[
+            Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Preparing search index...',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (_searcherWarmError != null) ...[
+            Text(
+              'Warm-up failed: $_searcherWarmError',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (_lastSearchDurationMs != null) ...[
+            Text(
+              'Last search: ${_searchResults.length} result(s) in $_lastSearchDurationMs ms',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -508,28 +560,73 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     );
   }
 
+  Future<void> _warmSearcher() async {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isSearcherWarming = true;
+      _searcherWarmError = null;
+    });
+
+    try {
+      await ref.read(
+        cachedSearcherProvider((
+          lynPath: widget.index.lynPath,
+          indexPath: widget.index.indexPath,
+        )).future,
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _searcherWarmError = e.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSearcherWarming = false;
+        });
+      }
+    }
+  }
+
   void _performSearch() async {
     if (_searchController.text.isEmpty) return;
 
+    if (_searcherWarmup != null) {
+      await _searcherWarmup;
+    }
+
     try {
-      final archiveFile = File(widget.index.lynPath);
-      final searcher = LynSokSearcher(
-        archiveFile: archiveFile,
-        indexPath: widget.index.indexPath,
+      final stopwatch = Stopwatch()..start();
+      final searcher = await ref.read(
+        cachedSearcherProvider((
+          lynPath: widget.index.lynPath,
+          indexPath: widget.index.indexPath,
+        )).future,
       );
-      if (File(widget.index.indexPath).existsSync()) {
-        await searcher.loadIndex();
-      }
-      final results = await searcher.indexedSearch(
-        _searchController.text,
-        maxResults: _maxResults,
-        contextWindowBytes: 200,
-      );
+      final hasIndex = File(widget.index.indexPath).existsSync();
+      final results = hasIndex
+          ? await searcher.indexedSearch(
+              _searchController.text,
+              maxResults: _maxResults,
+              contextWindowBytes: 200,
+            )
+          : await searcher.rawSearch(
+              _searchController.text,
+              maxResults: _maxResults,
+              contextWindowBytes: 200,
+            );
+      stopwatch.stop();
 
       final queryTerms = _extractQueryTerms(_searchController.text);
 
       setState(() {
         _queryTerms = queryTerms;
+        _lastSearchDurationMs = stopwatch.elapsedMilliseconds;
         _searchResults = results.map((result) {
           return {
             'title': result.path.split('/').last,
@@ -1120,6 +1217,10 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
             ),
             FilledButton(
               onPressed: () async {
+                final dialogNavigator = Navigator.of(context);
+                final pageNavigator = Navigator.of(this.context);
+                final messenger = ScaffoldMessenger.of(this.context);
+
                 try {
                   final config = ref.read(configProvider);
                   final serverNotifier = ref.read(
@@ -1152,20 +1253,20 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                         .removeIndex(widget.index.id!);
                   }
 
-                  if (mounted) {
-                    Navigator.of(context).pop(); // Close dialog
-                    Navigator.of(context).pop(); // Back to dashboard
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Index deleted')),
-                    );
-                  }
+                  if (!mounted) return;
+
+                  dialogNavigator.pop(); // Close dialog
+                  pageNavigator.pop(); // Back to dashboard
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Index deleted')),
+                  );
                 } catch (e) {
-                  if (mounted) {
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to delete: $e')),
-                    );
-                  }
+                  if (!mounted) return;
+
+                  dialogNavigator.pop();
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('Failed to delete: $e')),
+                  );
                 }
               },
               child: const Text('Delete'),

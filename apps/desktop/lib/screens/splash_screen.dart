@@ -113,7 +113,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
                     // App Name
                     Text(
-                      'LynSøk',
+                      'LynSok',
                       style: Theme.of(context).textTheme.headlineLarge
                           ?.copyWith(
                             fontWeight: FontWeight.bold,

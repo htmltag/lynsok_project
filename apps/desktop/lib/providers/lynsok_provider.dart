@@ -11,6 +11,25 @@ final configProvider = StateNotifierProvider<ConfigNotifier, LynSokConfig?>((
   return ConfigNotifier();
 });
 
+typedef SearcherKey = ({String lynPath, String indexPath});
+
+// Cached searcher per archive/index path pair.
+// This keeps the loaded index in memory and avoids repeated JSON load/parse
+// on every query from the desktop Search tab.
+final cachedSearcherProvider =
+    FutureProvider.family<LynSokSearcher, SearcherKey>((ref, key) async {
+      final searcher = LynSokSearcher(
+        archiveFile: File(key.lynPath),
+        indexPath: key.indexPath,
+      );
+
+      if (File(key.indexPath).existsSync()) {
+        await searcher.loadIndex();
+      }
+
+      return searcher;
+    });
+
 class ConfigNotifier extends StateNotifier<LynSokConfig?> {
   ConfigNotifier() : super(null) {
     _loadConfig();

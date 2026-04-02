@@ -179,33 +179,39 @@ class LynSokSearcher {
 
     final results = <SearchResult>[];
 
-    for (final entry in sorted.take(maxResults)) {
-      final docId = entry.key;
-      var score = entry.value;
-      final doc = index.docs[docId];
+    final archiveHandle = await archiveFile.open();
+    try {
+      for (final entry in sorted.take(maxResults)) {
+        final docId = entry.key;
+        var score = entry.value;
+        final doc = index.docs[docId];
 
-      final distance = docProximity[docId] ?? double.infinity;
-      final proximity = distance.isFinite ? 1 / (1 + log(1 + distance)) : 0.0;
-      score = score * (1 + proximityWeight * proximity);
+        final distance = docProximity[docId] ?? double.infinity;
+        final proximity = distance.isFinite ? 1 / (1 + log(1 + distance)) : 0.0;
+        score = score * (1 + proximityWeight * proximity);
 
-      // Center snippet around the best-known term location.
-      // Fall back to the first known offset if we couldn't compute proximity.
-      final matchOffset =
-          docCenterOffset[docId] ?? (docOffsets[docId]?.first.offset ?? 0);
-      final snippet = await _snippetForDoc(
-        doc,
-        terms,
-        matchOffset,
-        contextWindowBytes: contextWindowBytes,
-      );
-      results.add(
-        SearchResult(
-          path: doc.path,
-          score: score,
-          snippet: snippet,
-          matchOffset: matchOffset,
-        ),
-      );
+        // Center snippet around the best-known term location.
+        // Fall back to the first known offset if we couldn't compute proximity.
+        final matchOffset =
+            docCenterOffset[docId] ?? (docOffsets[docId]?.first.offset ?? 0);
+        final snippet = await _snippetForDoc(
+          archiveHandle,
+          doc,
+          terms,
+          matchOffset,
+          contextWindowBytes: contextWindowBytes,
+        );
+        results.add(
+          SearchResult(
+            path: doc.path,
+            score: score,
+            snippet: snippet,
+            matchOffset: matchOffset,
+          ),
+        );
+      }
+    } finally {
+      await archiveHandle.close();
     }
 
     return results;
@@ -238,24 +244,20 @@ class LynSokSearcher {
   }
 
   Future<String> _snippetForDoc(
+    RandomAccessFile archiveHandle,
     DocumentInfo doc,
     List<String> terms,
     int? centerOffset, {
     int contextWindowBytes = 1200,
   }) async {
-    final raf = await archiveFile.open();
-    try {
-      await raf.setPosition(doc.bodyOffset);
-      final bodyBytes = await raf.read(doc.bodyLength);
-      final snippet = _extractContextWindow(
-        bodyBytes,
-        centerOffset ?? 0,
-        padding: contextWindowBytes,
-      );
-      return _highlightTerms(snippet, terms);
-    } finally {
-      await raf.close();
-    }
+    await archiveHandle.setPosition(doc.bodyOffset);
+    final bodyBytes = await archiveHandle.read(doc.bodyLength);
+    final snippet = _extractContextWindow(
+      bodyBytes,
+      centerOffset ?? 0,
+      padding: contextWindowBytes,
+    );
+    return _highlightTerms(snippet, terms);
   }
 
   /// Extracts a "smart" context window around [matchOffset] from [body].
