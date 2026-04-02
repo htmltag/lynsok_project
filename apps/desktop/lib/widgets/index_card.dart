@@ -1,16 +1,42 @@
 import 'package:desktop/models/index_model.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:desktop/providers/index_provider.dart';
+import 'package:desktop/providers/lynsok_provider.dart';
+import 'package:desktop/providers/server_process_provider.dart';
 
-class IndexCard extends StatelessWidget {
+class IndexCard extends ConsumerWidget {
   final IndexModel indexModel;
   final VoidCallback onTap;
 
   const IndexCard({super.key, required this.indexModel, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
+    final metricsStyle = theme.textTheme.labelMedium?.copyWith(
+      color: muted,
+      fontWeight: FontWeight.w500,
+    );
+    final config = ref.watch(configProvider);
+    final fileTypeStats = ref.watch(
+      indexFileTypeStatsProvider(indexModel.indexPath),
+    );
+    final serverState = ref.watch(
+      indexServersProviderWithConfig((
+        id: indexModel.id?.toString() ?? 'unknown',
+        lynPath: indexModel.lynPath,
+        indexPath: indexModel.indexPath,
+        port: config?.restPort ?? 8181,
+      )),
+    );
+
+    final idxCount = fileTypeStats.asData?.value.totalDocuments ?? 0;
+    final effectiveFileCount = indexModel.fileCount > 0
+        ? indexModel.fileCount
+        : idxCount;
+    final fileCountText = '${_formatFileCount(effectiveFileCount)} files';
 
     return _CardHoverLift(
       child: Card(
@@ -18,7 +44,7 @@ class IndexCard extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -35,96 +61,78 @@ class IndexCard extends StatelessWidget {
                                 child: Text(
                                   indexModel.name,
                                   style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.2,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              if (indexModel.isServerRunning) ...[
-                                const SizedBox(width: 8),
-                                Container(
-                                  width: 9,
-                                  height: 9,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.green,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${indexModel.formattedFileCount} Files - ${indexModel.formattedSize}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: muted,
-                            ),
-                          ),
+                          const SizedBox(height: 6),
+                          Text(fileCountText, style: metricsStyle),
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.folder_open_outlined, size: 18),
-                      splashRadius: 18,
-                      tooltip: 'Open index',
+                    const Icon(Icons.chevron_right, size: 20),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(Icons.schedule, size: 13, color: muted),
+                    const SizedBox(width: 7),
+                    Text(
+                      'Created: ${_formatRelativeTime(indexModel.createdAt)}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: muted,
+                        letterSpacing: 0.1,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Icon(Icons.schedule, size: 14, color: muted),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Last indexed: ${indexModel.formattedLastModified}',
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                _buildActivityStrip(context),
-                const SizedBox(height: 14),
-                _buildFileTypeBreakdown(context),
+                _buildServerLights(context, serverState),
                 const SizedBox(height: 12),
+                _buildFileTypeBreakdown(context, fileTypeStats),
+                const SizedBox(height: 14),
+                Text(
+                  'Source',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
                 Text(
                   indexModel.sourcePath,
-                  style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: muted,
+                    fontFamily: 'monospace',
+                    height: 1.25,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const Spacer(),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.tonalIcon(
-                        onPressed: () {
-                          // TODO: Connect to real process toggles.
-                        },
-                        icon: Icon(
-                          indexModel.isServerRunning
-                              ? Icons.stop
-                              : Icons.play_arrow,
-                          size: 14,
-                        ),
-                        label: Text(
-                          indexModel.isServerRunning ? 'Running' : 'Start',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          // TODO: Trigger sync/index refresh.
-                        },
-                        icon: const Icon(Icons.sync, size: 14),
-                        label: const Text('Sync'),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 10),
+                Text(
+                  'Index',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  indexModel.indexPath,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: muted,
+                    fontFamily: 'monospace',
+                    height: 1.25,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -134,75 +142,172 @@ class IndexCard extends StatelessWidget {
     );
   }
 
-  Widget _buildActivityStrip(BuildContext context) {
-    final values = [14, 20, 18, 24, 21, 30, 26, 34, 31, 39];
-    return SizedBox(
-      height: 36,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: values
-            .map(
-              (v) => Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 1),
-                  child: Container(
-                    height: v.toDouble(),
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.primary.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                ),
-              ),
-            )
-            .toList(),
-      ),
+  Widget _buildServerLights(BuildContext context, IndexServersState state) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 6,
+      children: [
+        _buildServerLight(
+          context,
+          label: 'HTTP',
+          isRunning: state.httpServerRunning,
+        ),
+        _buildServerLight(
+          context,
+          label: 'MCP',
+          isRunning: state.mcpServerRunning,
+        ),
+      ],
     );
   }
 
-  Widget _buildFileTypeBreakdown(BuildContext context) {
-    final rows = [
-      ('TXT', 55, const Color(0xFF3B82F6)),
-      ('MD', 25, const Color(0xFF60A5FA)),
-      ('PDF', 15, const Color(0xFF93C5FD)),
-      ('Other', 5, const Color(0xFFDBEAFE)),
-    ];
-
-    return Column(
+  Widget _buildServerLight(
+    BuildContext context, {
+    required String label,
+    required bool isRunning,
+  }) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final color = isRunning ? Colors.green : Colors.red;
+    final statusText = isRunning ? 'Running' : 'Stopped';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        for (final (name, value, color) in rows)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  name,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '$value%',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(color: muted, letterSpacing: 0.2),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          statusText,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: muted,
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.15,
           ),
+        ),
       ],
+    );
+  }
+
+  String _formatFileCount(int count) {
+    if (count < 1000) {
+      return count.toString();
+    }
+    if (count < 1000000) {
+      return '${(count / 1000).toStringAsFixed(1)}K';
+    }
+    return '${(count / 1000000).toStringAsFixed(1)}M';
+  }
+
+  String _formatRelativeTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+
+    if (difference.inDays > 0) {
+      return '${difference.inDays}d ago';
+    }
+    if (difference.inHours > 0) {
+      return '${difference.inHours}h ago';
+    }
+    if (difference.inMinutes > 0) {
+      return '${difference.inMinutes}m ago';
+    }
+    return 'Just now';
+  }
+
+  Widget _buildFileTypeBreakdown(
+    BuildContext context,
+    AsyncValue<IndexFileTypeStats> stats,
+  ) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    return stats.when(
+      loading: () => Row(
+        children: [
+          const SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Loading file type stats...',
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: muted),
+          ),
+        ],
+      ),
+      error: (_, _) => Text(
+        'File type stats unavailable',
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(color: muted),
+      ),
+      data: (data) {
+        if (data.totalDocuments == 0 || data.rows.isEmpty) {
+          return Text(
+            'No file type data yet',
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: muted),
+          );
+        }
+
+        final rows = data.rows.take(4);
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 7),
+          decoration: BoxDecoration(
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Top file types',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              for (final row in rows)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Row(
+                    children: [
+                      Text(
+                        row.label,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: muted,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${row.count} (${((row.count / data.totalDocuments) * 100).toStringAsFixed(0)}%)',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

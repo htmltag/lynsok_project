@@ -74,8 +74,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                       const SizedBox(width: 16),
                       IconButton.outlined(
-                        onPressed: () =>
-                            ref.read(indexProvider.notifier).refreshIndexes(),
+                        onPressed: () {
+                          for (final index in indexState.indexes) {
+                            ref.invalidate(
+                              indexFileTypeStatsProvider(index.indexPath),
+                            );
+                          }
+                          ref.read(indexProvider.notifier).refreshIndexes();
+                        },
                         icon: const Icon(Icons.refresh),
                         tooltip: 'Refresh indexes',
                       ),

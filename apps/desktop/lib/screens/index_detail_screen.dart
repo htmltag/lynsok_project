@@ -1215,6 +1215,9 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
               if (!indexingState.isIndexing) {
                 return TextButton(
                   onPressed: () {
+                    ref.invalidate(
+                      indexFileTypeStatsProvider(widget.index.indexPath),
+                    );
                     Navigator.of(context).pop();
                     // Refresh the index list
                     ref.read(indexProvider.notifier).refreshIndexes();

@@ -2,6 +2,68 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:desktop/models/index_model.dart';
 import 'package:desktop/services/database_service.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path/path.dart' as p;
+
+class FileTypeStat {
+  final String label;
+  final int count;
+
+  const FileTypeStat({required this.label, required this.count});
+}
+
+class IndexFileTypeStats {
+  final int totalDocuments;
+  final List<FileTypeStat> rows;
+
+  const IndexFileTypeStats({required this.totalDocuments, required this.rows});
+}
+
+final indexFileTypeStatsProvider =
+    FutureProvider.family<IndexFileTypeStats, String>((ref, indexPath) async {
+      final file = File(indexPath);
+      if (!await file.exists()) {
+        return const IndexFileTypeStats(totalDocuments: 0, rows: []);
+      }
+
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map<String, dynamic>) {
+        return const IndexFileTypeStats(totalDocuments: 0, rows: []);
+      }
+
+      final docs = decoded['docs'];
+      if (docs is! List) {
+        return const IndexFileTypeStats(totalDocuments: 0, rows: []);
+      }
+
+      final counts = <String, int>{};
+      var total = 0;
+
+      for (final raw in docs) {
+        if (raw is! Map) {
+          continue;
+        }
+
+        final rawPath = raw['path'];
+        if (rawPath is! String || rawPath.isEmpty) {
+          continue;
+        }
+
+        final ext = p.extension(rawPath).toLowerCase();
+        final label = ext.isEmpty ? 'No ext' : ext.substring(1).toUpperCase();
+        counts[label] = (counts[label] ?? 0) + 1;
+        total++;
+      }
+
+      final rows =
+          counts.entries
+              .map((e) => FileTypeStat(label: e.key, count: e.value))
+              .toList()
+            ..sort((a, b) => b.count.compareTo(a.count));
+
+      return IndexFileTypeStats(totalDocuments: total, rows: rows);
+    });
 
 final indexProvider = StateNotifierProvider<IndexNotifier, IndexState>((ref) {
   return IndexNotifier();
