@@ -36,7 +36,7 @@ Uint8List makeFakeDocx(String text) {
   final xml =
       '<w:document><w:body><w:p><w:r><w:t>$text</w:t></w:r></w:p></w:body></w:document>';
   arch.addFile(ArchiveFile('word/document.xml', xml.length, utf8.encode(xml)));
-  final data = ZipEncoder().encode(arch)!;
+  final data = ZipEncoder().encode(arch);
   return Uint8List.fromList(data);
 }
 
@@ -78,7 +78,7 @@ void main() {
       arch.addFile(
         ArchiveFile('word/document.xml', xml.length, utf8.encode(xml)),
       );
-      final data = ZipEncoder().encode(arch)!;
+      final data = ZipEncoder().encode(arch);
       final extracted = extractFromChunk(
         Uint8List.fromList(data),
         0,
@@ -96,7 +96,7 @@ void main() {
       arch.addFile(
         ArchiveFile('word/document.xml', xml.length, utf8.encode(xml)),
       );
-      final data = ZipEncoder().encode(arch)!;
+      final data = ZipEncoder().encode(arch);
       final extracted = extractFromChunk(
         Uint8List.fromList(data),
         0,
@@ -148,7 +148,12 @@ void main() {
           final prefix = utf8.encode('%PDF-1.0\n');
           final header = utf8.encode('abc stream\n');
           final footer = utf8.encode('\nendstream xyz');
-          final pdfbytes = <int>[...prefix, ...header, ...latin1Compressed, ...footer];
+          final pdfbytes = <int>[
+            ...prefix,
+            ...header,
+            ...latin1Compressed,
+            ...footer,
+          ];
           await f4.writeAsBytes(Uint8List.fromList(pdfbytes));
 
           final archive = io.File('${tempDir.path}/out.lyn');
