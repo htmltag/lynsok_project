@@ -2,7 +2,6 @@ import 'package:desktop/models/index_model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:desktop/providers/index_provider.dart';
-import 'package:desktop/providers/lynsok_provider.dart';
 import 'package:desktop/providers/server_process_provider.dart';
 
 class IndexCard extends ConsumerWidget {
@@ -19,7 +18,6 @@ class IndexCard extends ConsumerWidget {
       color: muted,
       fontWeight: FontWeight.w500,
     );
-    final config = ref.watch(configProvider);
     final fileTypeStats = ref.watch(
       indexFileTypeStatsProvider(indexModel.indexPath),
     );
@@ -28,7 +26,8 @@ class IndexCard extends ConsumerWidget {
         id: indexModel.id?.toString() ?? 'unknown',
         lynPath: indexModel.lynPath,
         indexPath: indexModel.indexPath,
-        port: config?.restPort ?? 8181,
+        httpPort: indexModel.httpPort,
+        mcpPort: indexModel.mcpPort,
       )),
     );
 

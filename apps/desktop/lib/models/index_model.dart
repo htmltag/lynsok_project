@@ -1,4 +1,6 @@
 class IndexModel {
+  static const Object _sentinel = Object();
+
   int? id;
   String name;
   String sourcePath;
@@ -12,6 +14,8 @@ class IndexModel {
   List<String> excludePatterns;
   int? httpServerPid;
   int? mcpServerPid;
+  int? httpPort;
+  int? mcpPort;
 
   IndexModel({
     this.id,
@@ -27,6 +31,8 @@ class IndexModel {
     this.excludePatterns = const [],
     this.httpServerPid,
     this.mcpServerPid,
+    this.httpPort,
+    this.mcpPort,
   }) : createdAt = createdAt ?? DateTime.now();
 
   // Convert to Map for database
@@ -45,6 +51,8 @@ class IndexModel {
       'excludePatterns': excludePatterns.join(';'),
       'httpServerPid': httpServerPid,
       'mcpServerPid': mcpServerPid,
+      'httpPort': httpPort,
+      'mcpPort': mcpPort,
     };
   }
 
@@ -66,6 +74,8 @@ class IndexModel {
       excludePatterns: map['excludePatterns']?.split(';') ?? [],
       httpServerPid: map['httpServerPid'] as int?,
       mcpServerPid: map['mcpServerPid'] as int?,
+      httpPort: map['httpPort'] as int?,
+      mcpPort: map['mcpPort'] as int?,
     );
   }
 
@@ -83,6 +93,8 @@ class IndexModel {
     List<String>? excludePatterns,
     int? httpServerPid,
     int? mcpServerPid,
+    Object? httpPort = _sentinel,
+    Object? mcpPort = _sentinel,
   }) {
     return IndexModel(
       id: id ?? this.id,
@@ -98,6 +110,10 @@ class IndexModel {
       excludePatterns: excludePatterns ?? this.excludePatterns,
       httpServerPid: httpServerPid ?? this.httpServerPid,
       mcpServerPid: mcpServerPid ?? this.mcpServerPid,
+      httpPort: identical(httpPort, _sentinel)
+          ? this.httpPort
+          : httpPort as int?,
+      mcpPort: identical(mcpPort, _sentinel) ? this.mcpPort : mcpPort as int?,
     );
   }
 

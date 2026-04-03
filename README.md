@@ -1,10 +1,10 @@
-﻿# ⚡ LynSok (Lyn-Sok)
+﻿# ⚡ LynSøk (Lyn-Sok)
 **Instant, local-first context for AI—without the vector bloat.**
 
-LynSok (Norwegian for Lightning Search) is a high-performance retrieval engine designed to bridge the gap between massive private document archives and Large Language Models. Built in Dart for native performance, it provides the "Ground Truth" for your AI agents at hardware-accelerated speeds.
+LynSøk (Norwegian for Lightning Search) is a high-performance retrieval engine designed to bridge the gap between massive private document archives and Large Language Models. Built in Dart for native performance, it provides the "Ground Truth" for your AI agents at hardware-accelerated speeds.
 
-## Why LynSok?
-In a world of complex cloud-based vector databases, LynSok takes a different path: **Extreme efficiency through local indexing.**
+## Why LynSøk?
+In a world of complex cloud-based vector databases, LynSøk takes a different path: **Extreme efficiency through local indexing.**
 
 🚀 **Native Speed:** Optimized binary seeking and Logical Block Addressing (LBA) allow for sub-second retrieval from gigabyte-scale archives.
 

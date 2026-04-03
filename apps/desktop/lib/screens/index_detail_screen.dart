@@ -23,8 +23,11 @@ class IndexDetailScreen extends ConsumerStatefulWidget {
 
 class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     with TickerProviderStateMixin {
+  late IndexModel _index;
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  late final TextEditingController _httpPortController;
+  late final TextEditingController _mcpPortController;
   final ScrollController _previewScrollController = ScrollController();
   final PdfViewerController _pdfViewerController = PdfViewerController();
   final ScrollController _connectivityScrollController = ScrollController();
@@ -48,10 +51,18 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   bool _showConnectivityBottomFade = false;
   bool _showMaintenanceTopFade = false;
   bool _showMaintenanceBottomFade = false;
+  bool _isSavingPortSettings = false;
 
   @override
   void initState() {
     super.initState();
+    _index = widget.index;
+    _httpPortController = TextEditingController(
+      text: _index.httpPort?.toString() ?? '',
+    );
+    _mcpPortController = TextEditingController(
+      text: _index.mcpPort?.toString() ?? '',
+    );
     _tabController = TabController(length: 3, vsync: this);
     _pdfTextSearcher = PdfTextSearcher(_pdfViewerController);
     _pdfTextSearcher.addListener(_onPdfSearchStateChanged);
@@ -66,9 +77,21 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   }
 
   @override
+  void didUpdateWidget(covariant IndexDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.index.id != widget.index.id) {
+      _index = widget.index;
+      _httpPortController.text = _index.httpPort?.toString() ?? '';
+      _mcpPortController.text = _index.mcpPort?.toString() ?? '';
+    }
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _httpPortController.dispose();
+    _mcpPortController.dispose();
     _previewScrollController.dispose();
     _connectivityScrollController.removeListener(_updateConnectivityFades);
     _maintenanceScrollController.removeListener(_updateMaintenanceFades);
@@ -77,6 +100,99 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     _pdfTextSearcher.removeListener(_onPdfSearchStateChanged);
     _pdfTextSearcher.dispose();
     super.dispose();
+  }
+
+  ({String id, String lynPath, String indexPath, int? httpPort, int? mcpPort})
+  _serverProviderConfig() {
+    return (
+      id: _index.id?.toString() ?? 'unknown',
+      lynPath: _index.lynPath,
+      indexPath: _index.indexPath,
+      httpPort: _index.httpPort,
+      mcpPort: _index.mcpPort,
+    );
+  }
+
+  int? _parseConfiguredPort(String rawValue) {
+    final value = rawValue.trim();
+    if (value.isEmpty) {
+      return null;
+    }
+    return int.tryParse(value);
+  }
+
+  String? _validateConfiguredPort(String rawValue, String label) {
+    final value = rawValue.trim();
+    if (value.isEmpty) {
+      return null;
+    }
+    final parsed = int.tryParse(value);
+    if (parsed == null || parsed < 1 || parsed > 65535) {
+      return '$label port must be a number from 1 to 65535, or empty for auto.';
+    }
+    return null;
+  }
+
+  Future<void> _saveConfiguredPorts() async {
+    final httpError = _validateConfiguredPort(_httpPortController.text, 'HTTP');
+    if (httpError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(httpError)));
+      return;
+    }
+
+    final mcpError = _validateConfiguredPort(_mcpPortController.text, 'MCP');
+    if (mcpError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(mcpError)));
+      return;
+    }
+
+    if (_index.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot save port settings for this index yet.'),
+        ),
+      );
+      return;
+    }
+
+    final updatedIndex = _index.copyWith(
+      httpPort: _parseConfiguredPort(_httpPortController.text),
+      mcpPort: _parseConfiguredPort(_mcpPortController.text),
+    );
+
+    setState(() {
+      _isSavingPortSettings = true;
+    });
+
+    try {
+      await ref.read(indexProvider.notifier).updateIndex(updatedIndex);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _index = updatedIndex;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Server port settings saved.')),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to save ports: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSavingPortSettings = false;
+        });
+      }
+    }
   }
 
   void _onPdfSearchStateChanged() {
@@ -144,7 +260,7 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.index.name),
+        title: Text(_index.name),
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -356,25 +472,15 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   }
 
   Widget _buildConnectivityTab() {
-    final config = ref.watch(configProvider);
+    final providerConfig = _serverProviderConfig();
 
     // Watch server state for this index
     final serverState = ref.watch(
-      indexServersProviderWithConfig((
-        id: widget.index.id?.toString() ?? 'unknown',
-        lynPath: widget.index.lynPath,
-        indexPath: widget.index.indexPath,
-        port: config?.restPort ?? 8181,
-      )),
+      indexServersProviderWithConfig(providerConfig),
     );
 
     final serverNotifier = ref.read(
-      indexServersProviderWithConfig((
-        id: widget.index.id?.toString() ?? 'unknown',
-        lynPath: widget.index.lynPath,
-        indexPath: widget.index.indexPath,
-        port: config?.restPort ?? 8181,
-      )).notifier,
+      indexServersProviderWithConfig(providerConfig).notifier,
     );
 
     return Stack(
@@ -383,6 +489,70 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
           controller: _connectivityScrollController,
           padding: const EdgeInsets.all(16),
           children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Server Port Settings',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Leave blank to auto-pick a free port when the server starts.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _httpPortController,
+                      enabled: !_isSavingPortSettings && !serverState.isLoading,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'HTTP configured port',
+                        hintText: 'Auto',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _mcpPortController,
+                      enabled: !_isSavingPortSettings && !serverState.isLoading,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'MCP configured port',
+                        hintText: 'Auto',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            _isSavingPortSettings || serverState.isLoading
+                            ? null
+                            : _saveConfiguredPorts,
+                        icon: _isSavingPortSettings
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.save_outlined),
+                        label: const Text('Save Port Settings'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
             // HTTP Server
             Card(
               child: Padding(
@@ -407,6 +577,9 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                     ),
                     if (serverState.httpServerRunning) ...[
                       const SizedBox(height: 8),
+                      Text(
+                        'Configured port: ${_index.httpPort?.toString() ?? 'Auto'}',
+                      ),
                       Text(
                         'Running on port ${serverState.httpServerPort ?? '-'}',
                       ),
@@ -504,6 +677,9 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                     if (serverState.mcpServerRunning &&
                         serverState.mcpServerPid != null) ...[
                       const SizedBox(height: 8),
+                      Text(
+                        'Configured port: ${_index.mcpPort?.toString() ?? 'Auto'}',
+                      ),
                       Text(
                         'Running on port ${serverState.mcpServerPort ?? '-'}',
                       ),
@@ -1122,14 +1298,8 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   }
 
   String _generateConfigJson() {
-    final config = ref.read(configProvider);
     final serverState = ref.read(
-      indexServersProviderWithConfig((
-        id: widget.index.id?.toString() ?? 'unknown',
-        lynPath: widget.index.lynPath,
-        indexPath: widget.index.indexPath,
-        port: config?.restPort ?? 8181,
-      )),
+      indexServersProviderWithConfig(_serverProviderConfig()),
     );
     final mcpPort = serverState.mcpServerPort;
 
@@ -1146,14 +1316,8 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
   }
 
   Future<void> _testMcpServer() async {
-    final config = ref.read(configProvider);
     final serverState = ref.read(
-      indexServersProviderWithConfig((
-        id: widget.index.id?.toString() ?? 'unknown',
-        lynPath: widget.index.lynPath,
-        indexPath: widget.index.indexPath,
-        port: config?.restPort ?? 8181,
-      )),
+      indexServersProviderWithConfig(_serverProviderConfig()),
     );
 
     final port = serverState.mcpServerPort;
@@ -1374,14 +1538,10 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                 final messenger = ScaffoldMessenger.of(this.context);
 
                 try {
-                  final config = ref.read(configProvider);
                   final serverNotifier = ref.read(
-                    indexServersProviderWithConfig((
-                      id: widget.index.id?.toString() ?? 'unknown',
-                      lynPath: widget.index.lynPath,
-                      indexPath: widget.index.indexPath,
-                      port: config?.restPort ?? 8181,
-                    )).notifier,
+                    indexServersProviderWithConfig(
+                      _serverProviderConfig(),
+                    ).notifier,
                   );
 
                   await serverNotifier.stopHttpServer();

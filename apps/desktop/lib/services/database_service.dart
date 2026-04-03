@@ -4,7 +4,7 @@ import 'package:path_provider/path_provider.dart';
 
 class DatabaseService {
   static Database? _database;
-  static const int _dbVersion = 2;
+  static const int _dbVersion = 3;
 
   static Future<Database> getInstance() async {
     if (_database != null) return _database!;
@@ -40,7 +40,9 @@ class DatabaseService {
         serverActive INTEGER DEFAULT 0,
         excludePatterns TEXT,
         httpServerPid INTEGER,
-        mcpServerPid INTEGER
+        mcpServerPid INTEGER,
+        httpPort INTEGER,
+        mcpPort INTEGER
       )
     ''');
   }
@@ -54,12 +56,18 @@ class DatabaseService {
       await _addColumnIfMissing(db, 'indexes', 'httpServerPid', 'INTEGER');
       await _addColumnIfMissing(db, 'indexes', 'mcpServerPid', 'INTEGER');
     }
+    if (oldVersion < 3) {
+      await _addColumnIfMissing(db, 'indexes', 'httpPort', 'INTEGER');
+      await _addColumnIfMissing(db, 'indexes', 'mcpPort', 'INTEGER');
+    }
   }
 
   static Future<void> _ensureSchema(Database db) async {
     // Defensive check to self-heal partially migrated local DBs.
     await _addColumnIfMissing(db, 'indexes', 'httpServerPid', 'INTEGER');
     await _addColumnIfMissing(db, 'indexes', 'mcpServerPid', 'INTEGER');
+    await _addColumnIfMissing(db, 'indexes', 'httpPort', 'INTEGER');
+    await _addColumnIfMissing(db, 'indexes', 'mcpPort', 'INTEGER');
   }
 
   static Future<void> _addColumnIfMissing(

@@ -67,17 +67,22 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
   final String _indexId;
   final String _lynPath;
   final String _indexPath;
+  final int? _configuredHttpPort;
+  final int? _configuredMcpPort;
 
   IndexServersNotifier({
     required ServerService serverService,
     required String indexId,
     required String lynPath,
     required String indexPath,
-    int port = 8181,
+    int? configuredHttpPort,
+    int? configuredMcpPort,
   }) : _serverService = serverService,
        _indexId = indexId,
        _lynPath = lynPath,
        _indexPath = indexPath,
+       _configuredHttpPort = configuredHttpPort,
+       _configuredMcpPort = configuredMcpPort,
        super(const IndexServersState());
 
   /// Toggles the HTTP server on/off
@@ -98,7 +103,7 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
           serverId: _indexId,
           lynPath: _lynPath,
           indexPath: _indexPath,
-          port: 0,
+          port: _configuredHttpPort ?? 0,
         );
         final pid = _serverService.getHttpServerPid(_indexId);
         final assignedPort = _serverService.getHttpServerPort(_indexId);
@@ -135,7 +140,7 @@ class IndexServersNotifier extends StateNotifier<IndexServersState> {
           serverId: _indexId,
           lynPath: _lynPath,
           indexPath: _indexPath,
-          port: 0,
+          port: _configuredMcpPort ?? 0,
         );
         final pid = _serverService.getMcpServerPid(_indexId);
         final assignedPort = _serverService.getMcpServerPort(_indexId);
@@ -206,7 +211,13 @@ final indexServersProviderWithConfig =
     StateNotifierProvider.family<
       IndexServersNotifier,
       IndexServersState,
-      ({String id, String lynPath, String indexPath, int port})
+      ({
+        String id,
+        String lynPath,
+        String indexPath,
+        int? httpPort,
+        int? mcpPort,
+      })
     >((ref, config) {
       final serverService = ref.watch(serverServiceProvider);
       return IndexServersNotifier(
@@ -214,6 +225,7 @@ final indexServersProviderWithConfig =
         indexId: config.id,
         lynPath: config.lynPath,
         indexPath: config.indexPath,
-        port: config.port,
+        configuredHttpPort: config.httpPort,
+        configuredMcpPort: config.mcpPort,
       );
     });
