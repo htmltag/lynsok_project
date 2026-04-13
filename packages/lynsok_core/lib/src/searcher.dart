@@ -12,12 +12,40 @@ class SearchResult {
   final double score;
   final String snippet;
   final int matchOffset;
+  final List<String> matchedTerms;
+  final List<SearchMatchRange> matchRanges;
 
   SearchResult({
     required this.path,
     required this.score,
     required this.snippet,
     required this.matchOffset,
+    required this.matchedTerms,
+    required this.matchRanges,
+  });
+}
+
+class SearchMatchRange {
+  final int start;
+  final int end;
+  final String term;
+
+  SearchMatchRange({
+    required this.start,
+    required this.end,
+    required this.term,
+  });
+}
+
+class _SnippetMatchEvidence {
+  final String snippet;
+  final List<String> matchedTerms;
+  final List<SearchMatchRange> matchRanges;
+
+  const _SnippetMatchEvidence({
+    required this.snippet,
+    required this.matchedTerms,
+    required this.matchRanges,
   });
 }
 
@@ -67,23 +95,31 @@ class LynSokSearcher {
       }
       if (score > 0) {
         // Find the first match offset so the snippet is centered on an actual hit.
-        int matchOffset = 0;
+        int? earliestCharOffset;
         for (final term in terms) {
           final pos = lower.indexOf(term);
-          if (pos >= 0 && (matchOffset == 0 || pos < matchOffset)) {
-            matchOffset = pos;
+          if (pos >= 0 &&
+              (earliestCharOffset == null || pos < earliestCharOffset)) {
+            earliestCharOffset = pos;
           }
         }
-        final snippet = _highlightTerms(
-          _extractContextWindow(body, matchOffset, padding: contextWindowBytes),
+        final matchOffset = earliestCharOffset == null
+            ? 0
+            : _charIndexToUtf8ByteOffset(text, earliestCharOffset);
+        final snippetEvidence = _buildSnippetMatchEvidence(
+          body,
           terms,
+          matchOffset,
+          contextWindowBytes,
         );
         results.add(
           SearchResult(
             path: record['path'] as String,
             score: score.toDouble(),
-            snippet: snippet,
+            snippet: snippetEvidence.snippet,
             matchOffset: matchOffset,
+            matchedTerms: snippetEvidence.matchedTerms,
+            matchRanges: snippetEvidence.matchRanges,
           ),
         );
       }
@@ -205,8 +241,10 @@ class LynSokSearcher {
           SearchResult(
             path: doc.path,
             score: score,
-            snippet: snippet,
+            snippet: snippet.snippet,
             matchOffset: matchOffset,
+            matchedTerms: snippet.matchedTerms,
+            matchRanges: snippet.matchRanges,
           ),
         );
       }
@@ -243,7 +281,7 @@ class LynSokSearcher {
     return tokens.map((t) => t.token).toList();
   }
 
-  Future<String> _snippetForDoc(
+  Future<_SnippetMatchEvidence> _snippetForDoc(
     RandomAccessFile archiveHandle,
     DocumentInfo doc,
     List<String> terms,
@@ -252,12 +290,35 @@ class LynSokSearcher {
   }) async {
     await archiveHandle.setPosition(doc.bodyOffset);
     final bodyBytes = await archiveHandle.read(doc.bodyLength);
-    final snippet = _extractContextWindow(
+    return _buildSnippetMatchEvidence(
       bodyBytes,
+      terms,
       centerOffset ?? 0,
+      contextWindowBytes,
+    );
+  }
+
+  _SnippetMatchEvidence _buildSnippetMatchEvidence(
+    Uint8List body,
+    List<String> terms,
+    int centerOffset,
+    int contextWindowBytes,
+  ) {
+    final snippet = _extractContextWindow(
+      body,
+      centerOffset,
       padding: contextWindowBytes,
     );
-    return _highlightTerms(snippet, terms);
+    final matchRanges = _collectMatchRanges(snippet, terms);
+    final matchedTerms = matchRanges
+        .map((range) => range.term)
+        .toSet()
+        .toList(growable: false);
+    return _SnippetMatchEvidence(
+      snippet: snippet,
+      matchedTerms: matchedTerms,
+      matchRanges: matchRanges,
+    );
   }
 
   /// Extracts a "smart" context window around [matchOffset] from [body].
@@ -328,16 +389,29 @@ class LynSokSearcher {
     return utf8.decode(slice, allowMalformed: true).trim();
   }
 
-  String _highlightTerms(String text, List<String> terms) {
-    var snippet = text;
+  List<SearchMatchRange> _collectMatchRanges(String text, List<String> terms) {
+    final ranges = <SearchMatchRange>[];
     for (final term in terms) {
       final regex = RegExp(RegExp.escape(term), caseSensitive: false);
-      snippet = snippet.replaceAllMapped(
-        regex,
-        (m) => '\x1b[33m${m[0]}\x1b[0m',
-      );
+      final matches = regex.allMatches(text);
+      for (final match in matches) {
+        ranges.add(
+          SearchMatchRange(start: match.start, end: match.end, term: term),
+        );
+      }
     }
-    return snippet;
+    ranges.sort((a, b) => a.start.compareTo(b.start));
+    return ranges;
+  }
+
+  int _charIndexToUtf8ByteOffset(String text, int charIndex) {
+    if (charIndex <= 0) {
+      return 0;
+    }
+    if (charIndex >= text.length) {
+      return utf8.encode(text).length;
+    }
+    return utf8.encode(text.substring(0, charIndex)).length;
   }
 
   bool _isWhitespace(int byte) {

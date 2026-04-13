@@ -425,13 +425,19 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
                                 maxLines: 1,
                               ),
                               subtitle: _buildHighlightedResultText(
-                                _stripHighlightMarkers(
+                                _sanitizeSnippetText(
                                   result['snippet']?.toString() ?? '',
                                 ),
                                 baseStyle: Theme.of(
                                   context,
                                 ).textTheme.bodyMedium,
                                 maxLines: 3,
+                                explicitRanges: _extractMatchRanges(
+                                  result['matchRanges'],
+                                ),
+                              ),
+                              trailing: _buildMatchCountChip(
+                                result['matchRanges'],
                               ),
                               onTap: () => _onResultSelected(result),
                             );
@@ -959,6 +965,16 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
             'path': result.path,
             'score': result.score,
             'matchOffset': result.matchOffset,
+            'matchedTerms': result.matchedTerms,
+            'matchRanges': result.matchRanges
+                .map(
+                  (range) => {
+                    'start': range.start,
+                    'end': range.end,
+                    'term': range.term,
+                  },
+                )
+                .toList(growable: false),
           };
         }).toList();
         _selectedResult = null;
@@ -1100,32 +1116,25 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     String text, {
     required TextStyle? baseStyle,
     required int maxLines,
+    List<(int, int)>? explicitRanges,
   }) {
     return Text.rich(
-      _buildHighlightedSpan(text, baseStyle),
+      _buildHighlightedSpan(text, baseStyle, explicitRanges: explicitRanges),
       maxLines: maxLines,
       overflow: TextOverflow.ellipsis,
     );
   }
 
-  TextSpan _buildHighlightedSpan(String text, TextStyle? baseStyle) {
-    if (text.isEmpty || _queryTerms.isEmpty) {
+  TextSpan _buildHighlightedSpan(
+    String text,
+    TextStyle? baseStyle, {
+    List<(int, int)>? explicitRanges,
+  }) {
+    if (text.isEmpty) {
       return TextSpan(text: text, style: baseStyle);
     }
 
-    final lowerText = text.toLowerCase();
-    final ranges = <(int, int)>[];
-    for (final term in _queryTerms) {
-      var start = 0;
-      while (true) {
-        final index = lowerText.indexOf(term, start);
-        if (index < 0) {
-          break;
-        }
-        ranges.add((index, index + term.length));
-        start = index + 1;
-      }
-    }
+    final ranges = explicitRanges ?? _queryTermRanges(text);
 
     if (ranges.isEmpty) {
       return TextSpan(text: text, style: baseStyle);
@@ -1146,8 +1155,8 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
 
     final highlightStyle = (baseStyle ?? const TextStyle()).copyWith(
       fontWeight: FontWeight.w700,
-      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-      color: Theme.of(context).colorScheme.onPrimaryContainer,
+      backgroundColor: Theme.of(context).colorScheme.tertiary,
+      color: Theme.of(context).colorScheme.onTertiary,
     );
 
     final spans = <InlineSpan>[];
@@ -1173,8 +1182,73 @@ class _IndexDetailScreenState extends ConsumerState<IndexDetailScreen>
     return TextSpan(children: spans, style: baseStyle);
   }
 
-  String _stripHighlightMarkers(String text) {
-    return text.replaceAll('**', '');
+  List<(int, int)> _queryTermRanges(String text) {
+    if (_queryTerms.isEmpty) {
+      return const [];
+    }
+
+    final lowerText = text.toLowerCase();
+    final ranges = <(int, int)>[];
+    for (final term in _queryTerms) {
+      var start = 0;
+      while (true) {
+        final index = lowerText.indexOf(term, start);
+        if (index < 0) {
+          break;
+        }
+        ranges.add((index, index + term.length));
+        start = index + 1;
+      }
+    }
+    return ranges;
+  }
+
+  List<(int, int)> _extractMatchRanges(dynamic rawRanges) {
+    if (rawRanges is! List) {
+      return const [];
+    }
+
+    final ranges = <(int, int)>[];
+    for (final entry in rawRanges) {
+      if (entry is! Map) {
+        continue;
+      }
+
+      final start = entry['start'];
+      final end = entry['end'];
+      if (start is! int || end is! int || start < 0 || end <= start) {
+        continue;
+      }
+      ranges.add((start, end));
+    }
+    return ranges;
+  }
+
+  Widget? _buildMatchCountChip(dynamic rawRanges) {
+    final ranges = _extractMatchRanges(rawRanges);
+    if (ranges.isEmpty) {
+      return null;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '${ranges.length} match${ranges.length == 1 ? '' : 'es'}',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.onTertiaryContainer,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  String _sanitizeSnippetText(String text) {
+    final ansiEscape = RegExp(r'\x1B\[[0-9;]*m');
+    return text.replaceAll(ansiEscape, '').replaceAll('**', '');
   }
 
   List<String> _extractQueryTerms(String query) {

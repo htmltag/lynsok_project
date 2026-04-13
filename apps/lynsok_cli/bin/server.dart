@@ -66,7 +66,21 @@ Future<void> main(List<String> args) async {
         'query': query,
         'results': results
             .map(
-              (r) => {'path': r.path, 'score': r.score, 'snippet': r.snippet},
+              (r) => {
+                'path': r.path,
+                'score': r.score,
+                'snippet': r.snippet,
+                'matched_terms': r.matchedTerms,
+                'match_ranges': r.matchRanges
+                    .map(
+                      (range) => {
+                        'start': range.start,
+                        'end': range.end,
+                        'term': range.term,
+                      },
+                    )
+                    .toList(growable: false),
+              },
             )
             .toList(),
       };
