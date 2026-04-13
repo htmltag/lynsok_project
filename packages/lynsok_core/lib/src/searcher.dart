@@ -335,13 +335,16 @@ class LynSokSearcher {
     final endCandidate = (matchOffset + padding).clamp(0, len);
 
     int start = startCandidate;
+    var foundStartBoundary = false;
     while (start > 0) {
       // Prefer paragraph boundaries first.
       if (start >= 2 && body[start - 2] == 10 && body[start - 1] == 10) {
+        foundStartBoundary = true;
         break;
       }
       // Prefer line boundaries.
       if (body[start - 1] == 10) {
+        foundStartBoundary = true;
         break;
       }
       // Prefer sentence boundaries so that we return a complete thought.
@@ -349,13 +352,42 @@ class LynSokSearcher {
           body[start - 1] == 33 ||
           body[start - 1] == 63) {
         // '.', '!', '?'
+        foundStartBoundary = true;
         break;
       }
       start--;
     }
 
+    // If no boundary exists behind the start candidate, find one ahead of it
+    // but still before the match so snippets stay centered on relevant text.
+    if (!foundStartBoundary) {
+      var forward = startCandidate;
+      final forwardLimit = matchOffset.clamp(0, len);
+      while (forward < forwardLimit) {
+        if (forward + 1 < len && body[forward] == 10 && body[forward + 1] == 10) {
+          start = forward + 2;
+          foundStartBoundary = true;
+          break;
+        }
+        if (body[forward] == 10) {
+          start = forward + 1;
+          foundStartBoundary = true;
+          break;
+        }
+        if (body[forward] == 46 || body[forward] == 33 || body[forward] == 63) {
+          start = forward + 1;
+          while (start < len && _isWhitespace(body[start])) {
+            start++;
+          }
+          foundStartBoundary = true;
+          break;
+        }
+        forward++;
+      }
+    }
+
     // If we didn't find a good boundary, avoid cutting mid-word.
-    if (start == startCandidate && start > 0 && start < len) {
+    if (!foundStartBoundary && start > 0 && start < len) {
       while (start < len && !_isWhitespace(body[start])) {
         start++;
       }
