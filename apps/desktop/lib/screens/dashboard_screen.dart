@@ -191,7 +191,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               : 1;
 
           return GridView.builder(
-            padding: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.only(top: 8, bottom: 4),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
               crossAxisSpacing: 18,
@@ -402,42 +402,67 @@ class _SidebarButtonState extends State<_SidebarButton> {
   Widget build(BuildContext context) {
     final active = widget.selected || _isHovered;
 
-    return Material(
-      color: active
-          ? Theme.of(context).colorScheme.surfaceContainerHighest
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _isHovered = true),
-        onExit: (_) => setState(() => _isHovered = false),
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 140),
-          scale: _isHovered ? 1.015 : 1,
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(10),
-            child: AnimatedPadding(
-              duration: const Duration(milliseconds: 140),
-              padding: EdgeInsets.fromLTRB(_isHovered ? 14 : 12, 10, 12, 10),
-              child: Row(
-                children: [
-                  Icon(
-                    widget.icon,
-                    size: 20,
-                    color: widget.selected
-                        ? Theme.of(context).colorScheme.onSurface
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    widget.label,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        decoration: BoxDecoration(
+          color: active
+              ? Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: widget.selected ? 0.5 : 0.8)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: _isHovered
+                ? Theme.of(context).colorScheme.primary
+                : widget.selected
+                    ? Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.45)
+                    : Colors.transparent,
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 140),
+            scale: _isHovered ? 1.015 : 1,
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: BorderRadius.circular(10),
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 140),
+                padding:
+                    EdgeInsets.fromLTRB(_isHovered ? 14 : 12, 10, 12, 10),
+                child: Row(
+                  children: [
+                    Icon(
+                      widget.icon,
+                      size: 20,
                       color: widget.selected
                           ? Theme.of(context).colorScheme.onSurface
                           : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    Text(
+                      widget.label,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(
+                            color: widget.selected
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -591,14 +616,31 @@ class _HoverLiftState extends State<_HoverLift> {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: AnimatedScale(
-        duration: const Duration(milliseconds: 150),
-        scale: _isHovered ? 1.01 : 1,
-        child: AnimatedSlide(
-          duration: const Duration(milliseconds: 150),
-          offset: _isHovered ? const Offset(0, -0.01) : Offset.zero,
-          child: widget.child,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOutCubic,
+        transform: Matrix4.translationValues(0, _isHovered ? -4 : 0, 0),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _isHovered
+                ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
+                : Colors.transparent,
+          ),
+          boxShadow: _isHovered
+              ? [
+                  BoxShadow(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .shadow
+                        .withAlpha(0x28),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : const [],
         ),
+        child: widget.child,
       ),
     );
   }

@@ -328,33 +328,37 @@ class _CardHoverLiftState extends State<_CardHoverLift> {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: AnimatedScale(
+      child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         curve: Curves.easeOutCubic,
-        scale: _isHovered ? 1.012 : 1,
-        child: AnimatedSlide(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOutCubic,
-          offset: _isHovered ? const Offset(0, -0.012) : Offset.zero,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: _isHovered
-                  ? [
-                      BoxShadow(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.shadow.withValues(alpha: 0.16),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ]
-                  : const [],
-            ),
-            child: widget.child,
+        transform: Matrix4.translationValues(0, _isHovered ? -4 : 0, 0),
+        decoration: BoxDecoration(
+          color: _isHovered
+              ? Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: 0.08)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _isHovered
+                ? Theme.of(context).colorScheme.primary
+                : Colors.transparent,
           ),
+          boxShadow: _isHovered
+              ? [
+                  BoxShadow(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .shadow
+                        .withAlpha(0x28),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : const [],
         ),
+        child: widget.child,
       ),
     );
   }
